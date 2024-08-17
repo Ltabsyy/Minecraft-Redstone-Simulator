@@ -21,7 +21,9 @@ typedef struct _BlockState
 {
 	int state;//状态
 	int direction;//方向
+	int onBlock;//空气、红石线、红石火把、拉杆、按钮是否位于方块上
 	int delay;//红石中继器的延时红石刻(1-4)
+	char mode;//红石比较器和模式(c比较m减法)
 	int redstoneSignal;//红石信号强度(0-15)
 	int redstoneTick;//元件所处红石刻(0.1s)
 }BlockState;
@@ -37,14 +39,23 @@ enum ColorElem
 	Color_InventoryNumber_Current = 6,//主手序号
 	Color_MouseHighlight = 7,//鼠标悬浮高亮
 	Color_RedstoneSignal_0 = 8,//红石信号强度0
-	//Color_RedstoneSignal_1 = 9,//红石信号强度1
-	//Color_RedstoneSignal_2 = 10,//红石信号强度2
-	//Color_RedstoneSignal_3 = 11,//红石信号强度3
-	//Color_RedstoneSignal_4 = 12,//红石信号强度4
-	//Color_RedstoneSignal_5 = 13,//红石信号强度5
-	//Color_RedstoneSignal_6 = 14,//红石信号强度6
+	Color_RedstoneSignal_1 = 9,//红石信号强度1
+	Color_RedstoneSignal_2 = 10,//红石信号强度2
+	Color_RedstoneSignal_3 = 11,//红石信号强度3
+	Color_RedstoneSignal_4 = 12,//红石信号强度4
+	Color_RedstoneSignal_5 = 13,//红石信号强度5
+	Color_RedstoneSignal_6 = 14,//红石信号强度6
+	Color_RedstoneSignal_7 = 15,//红石信号强度7
+	Color_RedstoneSignal_8 = 16,//红石信号强度8
+	Color_RedstoneSignal_9 = 17,//红石信号强度9
+	Color_RedstoneSignal_10 = 18,//红石信号强度10
+	Color_RedstoneSignal_11 = 19,//红石信号强度11
+	Color_RedstoneSignal_12 = 20,//红石信号强度12
+	Color_RedstoneSignal_13 = 21,//红石信号强度13
+	Color_RedstoneSignal_14 = 22,//红石信号强度14
 	Color_RedstoneSignal_15 = 23,//红石信号强度15
 	Color_Wood = 24,//木质材料
+	Color_Block = 25//方块
 };
 
 color_t Color[] = {
@@ -72,7 +83,8 @@ color_t Color[] = {
 	EGERGB(0xef, 0, 0),//红石信号强度13
 	EGERGB(0xf7, 0, 0),//红石信号强度14
 	EGERGB(0xff, 0, 0),//红石信号强度15
-	PERU
+	PERU,//木质材料
+	WHITE//方块
 };
 
 BlockID** world;
@@ -83,6 +95,7 @@ int width = 0;
 int blockSideLength = 0;
 int heightOfInventory = 0;
 int currentTick = 0;
+int showInformation = 0;
 
 void InitInventory()
 {
@@ -93,6 +106,7 @@ void InitInventory()
 		inventoryState[i].state = 0;
 		inventoryState[i].direction = 0;
 		inventoryState[i].delay = 0;
+		inventoryState[i].mode = 0;
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = 0;
 		if(i == Air);
@@ -110,7 +124,11 @@ void InitInventory()
 		{
 			inventoryState[i].delay = 1;
 		}
-		else if(i == Redstone_Comparator);
+		else if(i == Redstone_Comparator)
+		{
+			inventoryState[i].delay = 1;
+			inventoryState[i].mode = 'c';
+		}
 	}
 }
 
@@ -204,8 +222,6 @@ void DrawTorch(int x0, int y0, int state)
 
 void DrawBlockID(int x, int y, int id, BlockState s)
 {
-	//setcolor(CYAN);
-	//xyprintf(x, y, "%d", id);
 	//标准方块边长16
 	if(id == Air);
 	else if(id == Redstone_Wire)
@@ -232,8 +248,11 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 			ege_fillrect(x, y+blockSideLength*7/16, blockSideLength/2, blockSideLength*2/16);
 		}
 		//能量数字
-		//setcolor(Color[Color_RedstoneSignal_0+s.redstoneSignal]);
-		//xyprintf(x+blockSideLength*8/16, y, "%2d", s.redstoneSignal);
+		if(showInformation)
+		{
+			setcolor(Color[Color_RedstoneSignal_0+s.redstoneSignal]);
+			xyprintf(x+blockSideLength*8/16, y, "%2d", s.redstoneSignal);
+		}
 	}
 	else if(id == Redstone_Torch)
 	{
@@ -311,9 +330,12 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 			DrawTorch(x+blockSideLength*(5+s.delay*2)/16, y+blockSideLength*8/16, !(s.state));
 		}
 		//延时数字
-		/*if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
-		else setcolor(Color[Color_RedstoneSignal_15]);
-		xyprintf(x+blockSideLength*11/16, y, "%d", s.delay);*/
+		if(showInformation)
+		{
+			if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
+			else setcolor(Color[Color_RedstoneSignal_15]);
+			xyprintf(x+blockSideLength*11/16, y, "%d", s.delay);
+		}
 	}
 	else if(id == Redstone_Comparator)
 	{
@@ -331,7 +353,7 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 			//上2*2，间隔7，下2*8
 			ege_fillrect(x+blockSideLength*7/16, y+blockSideLength*2/16, blockSideLength*2/16, blockSideLength*2/16);
 			ege_fillrect(x+blockSideLength*4/16, y+blockSideLength*11/16, blockSideLength*8/16, blockSideLength*2/16);
-			DrawTorch(x+blockSideLength*8/16, y+blockSideLength*3/16, !(s.state));
+			DrawTorch(x+blockSideLength*8/16, y+blockSideLength*3/16, !(s.mode == 'm'));
 			DrawTorch(x+blockSideLength*5/16, y+blockSideLength*12/16, !(s.state));
 			DrawTorch(x+blockSideLength*11/16, y+blockSideLength*12/16, !(s.state));
 		}
@@ -339,7 +361,7 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 		{
 			ege_fillrect(x+blockSideLength*12/16, y+blockSideLength*7/16, blockSideLength*2/16, blockSideLength*2/16);
 			ege_fillrect(x+blockSideLength*3/16, y+blockSideLength*4/16, blockSideLength*2/16, blockSideLength*8/16);
-			DrawTorch(x+blockSideLength*13/16, y+blockSideLength*8/16, !(s.state));
+			DrawTorch(x+blockSideLength*13/16, y+blockSideLength*8/16, !(s.mode == 'm'));
 			DrawTorch(x+blockSideLength*4/16, y+blockSideLength*5/16, !(s.state));
 			DrawTorch(x+blockSideLength*4/16, y+blockSideLength*11/16, !(s.state));
 		}
@@ -347,7 +369,7 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 		{
 			ege_fillrect(x+blockSideLength*7/16, y+blockSideLength*12/16, blockSideLength*2/16, blockSideLength*2/16);
 			ege_fillrect(x+blockSideLength*4/16, y+blockSideLength*3/16, blockSideLength*8/16, blockSideLength*2/16);
-			DrawTorch(x+blockSideLength*8/16, y+blockSideLength*13/16, !(s.state));
+			DrawTorch(x+blockSideLength*8/16, y+blockSideLength*13/16, !(s.mode == 'm'));
 			DrawTorch(x+blockSideLength*5/16, y+blockSideLength*4/16, !(s.state));
 			DrawTorch(x+blockSideLength*11/16, y+blockSideLength*4/16, !(s.state));
 		}
@@ -355,15 +377,17 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 		{
 			ege_fillrect(x+blockSideLength*2/16, y+blockSideLength*7/16, blockSideLength*2/16, blockSideLength*2/16);
 			ege_fillrect(x+blockSideLength*11/16, y+blockSideLength*4/16, blockSideLength*2/16, blockSideLength*8/16);
-			DrawTorch(x+blockSideLength*3/16, y+blockSideLength*8/16, !(s.state));
+			DrawTorch(x+blockSideLength*3/16, y+blockSideLength*8/16, !(s.mode == 'm'));
 			DrawTorch(x+blockSideLength*12/16, y+blockSideLength*5/16, !(s.state));
 			DrawTorch(x+blockSideLength*12/16, y+blockSideLength*11/16, !(s.state));
 		}
 		//模式字符
-		/*if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
-		else setcolor(Color[Color_RedstoneSignal_15]);
-		if(s.delay == 0) xyprintf(x+blockSideLength*6/16, y+blockSideLength*3/16, "c");
-		else xyprintf(x+blockSideLength*6/16, y+blockSideLength*3/16, "m");*/
+		if(showInformation)
+		{
+			if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
+			else setcolor(Color[Color_RedstoneSignal_15]);
+			xyprintf(x+blockSideLength*6/16, y+blockSideLength*3/16, "%c", s.mode);
+		}
 	}
 	else if(id == Lever)
 	{
@@ -379,13 +403,29 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 		{
 			ege_fillrect(x+blockSideLength*7/16, y+blockSideLength*8/16, blockSideLength*2/16, blockSideLength*6/16);
 		}
+		//激活状态
+		if(showInformation)
+		{
+			if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
+			else setcolor(Color[Color_RedstoneSignal_15]);
+			xyprintf(x+blockSideLength*12/16, y, "%d", s.state);
+		}
 	}
 	else if(id == Button)
 	{
 		//4*6
 		setfillcolor(Color[Color_Wood]);
 		ege_fillrect(x+blockSideLength*5/16, y+blockSideLength*6/16, blockSideLength*6/16, blockSideLength*4/16);
+		//激活状态
+		if(showInformation)
+		{
+			if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
+			else setcolor(Color[Color_RedstoneSignal_15]);
+			xyprintf(x+blockSideLength*12/16, y, "%d", s.state);
+		}
 	}
+	//setcolor(Color[Color_Border]);
+	//xyprintf(x, y, "%d", id);
 }
 
 void DrawBlock(int r, int c)
@@ -460,6 +500,50 @@ void PutBlock(BlockID id, int r, int c)
 	world[r][c] = id;
 	state[r][c] = inventoryState[id];
 	state[r][c].redstoneTick = currentTick;
+}
+
+int IsConnected(int rt, int ct, int rs, int cs)//s为红石线，t是否连接
+{
+	if(world[rt][ct] == Air) return 0;
+	else if(world[rt][ct] == Redstone_Wire) return 1;
+	else if(world[rt][ct] == Redstone_Torch)
+	{
+		return 1;//处于同层时连接
+	}
+	else if(world[rt][ct] == Redstone_Block)
+	{
+		return 1;//处于同层时连接
+	}
+	else if(world[rt][ct] == Redstone_Lamp)
+	{
+		return 1;//处于同层时连接
+	}
+	else if(world[rt][ct] == Redstone_Repeater)
+	{
+		//处于同层时连接
+		//处于输入输出方向时连接
+		if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
+		{
+			if((rt == rs-1 || rt == rs+1) && ct == cs) return 1;
+		}
+		else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
+		{
+			if(rt == rs && (ct == cs-1 || ct == cs+1)) return 1;
+		}
+	}
+	else if(world[rt][ct] == Redstone_Comparator)
+	{
+		return 1;//处于同层时连接
+	}
+	else if(world[rt][ct] == Lever)
+	{
+		return 1;//处于同层时连接
+	}
+	else if(world[rt][ct] == Button)
+	{
+		return 1;//处于同层时连接
+	}
+	return 0;
 }
 
 void SpreadSignalOnWire(int r, int c)
@@ -572,22 +656,22 @@ void UpdateWorld()
 				if(world[r][c] == Redstone_Wire)
 				{
 					state[r][c].direction = 0;//重置连接状态
-					if(r > 0 && world[r-1][c] != Air)
+					if(r > 0 && IsConnected(r-1, c, r, c))
 					{
 						state[r][c].direction |= 8;
 						if(world[r-1][c] == Redstone_Wire) state[r-1][c].direction |= 2;
 					}
-					if(c+1 < width && world[r][c+1] != Air)
+					if(c+1 < width && IsConnected(r, c+1, r, c))
 					{
 						state[r][c].direction |= 4;
 						if(world[r][c+1] == Redstone_Wire) state[r][c+1].direction |= 1;
 					}
-					if(r+1 < height && world[r+1][c] != Air)
+					if(r+1 < height && IsConnected(r+1, c, r, c))
 					{
 						state[r][c].direction |= 2;
 						if(world[r+1][c] == Redstone_Wire) state[r+1][c].direction |= 8;
 					}
-					if(c > 0 && world[r][c-1] != Air)
+					if(c > 0 && IsConnected(r, c-1, r, c))
 					{
 						state[r][c].direction |= 1;
 						if(world[r][c-1] == Redstone_Wire) state[r][c-1].direction |= 4;
@@ -618,7 +702,7 @@ void UpdateWorld()
 	{
 		for(c=0; c<width; c++)
 		{
-			if(state[r][c].redstoneSignal == 15 && world[r][c] != Redstone_Wire && state[r][c].redstoneTick == currentTick)
+			if(IsSignalSource(r, c) && state[r][c].redstoneTick == currentTick)
 			{
 				if(r > 0 && world[r-1][c] == Redstone_Wire)
 				{
@@ -840,7 +924,7 @@ int main()
 				}
 				else//滚轮切物品栏
 				{
-					if(mouseMsg.wheel > 0) mainhand = (mainhand+1)%numberOfBlockType;
+					if(mouseMsg.wheel < 0) mainhand = (mainhand+1)%numberOfBlockType;
 					else
 					{
 						mainhand--;
@@ -859,6 +943,26 @@ int main()
 						if(world[r][c] == Air)
 						{
 							PutBlock((BlockID)mainhand, r, c);
+						}
+						else if(world[r][c] == Redstone_Repeater)
+						{
+							state[r][c].delay++;
+							if(state[r][c].delay > 4) state[r][c].delay = 1;
+						}
+						else if(world[r][c] == Redstone_Comparator)
+						{
+							if(state[r][c].mode == 'c') state[r][c].mode = 'm';
+							else state[r][c].mode = 'c';
+						}
+						else if(world[r][c] == Lever)
+						{
+							state[r][c].state = !(state[r][c].state);
+						}
+						else if(world[r][c] == Button)
+						{
+							//state[r][c].state = 1;
+							//延时
+							state[r][c].state = !(state[r][c].state);
 						}
 					}
 					else if(mouseMsg.is_left())
@@ -894,6 +998,10 @@ int main()
 				}
 				if(mainhand >= numberOfBlockType || mainhand < 0) mainhand = 0;
 			}
+			if(keystate(key_f3))
+			{
+				showInformation = !showInformation;
+			}
 		}
 		delay_ms(RedstoneTick);
 		currentTick++;
@@ -910,6 +1018,13 @@ Minecraft Redstone Simulator 0.2
 ——新增 激活的红石比较器会使输出方向红石元件激活，输出信号为输入信号
 ——优化 现在只有正确的输入方向能点亮红石中继器和红石比较器
 ——修复 红石仅会在左半部分点亮
-//——优化 现在红石线不会与红石中继器的侧边连接
+Minecraft Redstone Simulator 0.3
+——新增 右键红石中继器、红石比较器、拉杆、按钮可以改变状态
+——新增 红石比较器输出端的红石火把亮起表示处于减法模式
+——新增 按F3显示红石线能量数字、红石中继器延时数字、红石比较器模式字符、拉杆激活状态、按钮激活状态
+——新增 按下的拉杆和按钮可以点亮红石线
+——优化 现在红石线不会与红石中继器的侧边连接
+——优化 反转滚轮切换物品栏方向
+//——新增 按钮弹起
 //——修复 激活的红石中继器、红石比较器的输出红石线不能激活红石元件
 --------------------------------*/
