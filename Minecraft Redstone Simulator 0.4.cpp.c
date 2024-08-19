@@ -22,10 +22,10 @@ typedef struct _BlockState
 	int state;//状态
 	int direction;//方向
 	int onBlock;//空气、红石线、红石火把、拉杆、按钮是否位于方块上
-	int delay;//红石中继器的延时红石刻(1-4)
-	char mode;//红石比较器和模式(c比较m减法)
+	int delay;//延时红石刻，红石线为0，红石中继器为1-4，其他为1
+	char mode;//红石比较器的模式(c比较m减法)
 	int redstoneSignal;//红石信号强度(0-15)
-	int redstoneTick;//元件所处红石刻(0.1s)
+	int redstoneTick;//元件进入状态的红石刻(0.1s)
 }BlockState;
 
 enum ColorElem
@@ -97,7 +97,7 @@ int heightOfInventory = 0;
 int currentTick = 0;
 int showInformation = 0;
 
-void InitInventory()
+void InitInventory()//设置所有元件默认状态
 {
 	int i;
 	inventoryState =(BlockState*) calloc(numberOfBlockType, sizeof(BlockState));
@@ -105,12 +105,15 @@ void InitInventory()
 	{
 		inventoryState[i].state = 0;
 		inventoryState[i].direction = 0;
-		inventoryState[i].delay = 0;
+		inventoryState[i].delay = 1;
 		inventoryState[i].mode = 0;
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = 0;
 		if(i == Air);
-		else if(i == Redstone_Wire);
+		else if(i == Redstone_Wire)
+		{
+			inventoryState[i].delay = 0;//认为信号源延时，不认为红石线延时
+		}
 		else if(i == Redstone_Torch)
 		{
 			inventoryState[i].redstoneSignal = 15;
@@ -120,19 +123,17 @@ void InitInventory()
 			inventoryState[i].redstoneSignal = 15;
 		}
 		else if(i == Redstone_Lamp);
-		else if(i == Redstone_Repeater)
-		{
-			inventoryState[i].delay = 1;
-		}
+		else if(i == Redstone_Repeater);
 		else if(i == Redstone_Comparator)
 		{
-			inventoryState[i].delay = 1;
 			inventoryState[i].mode = 'c';
 		}
+		else if(i == Lever);
+		else if(i == Button);//按钮按下时延迟1刻打开
 	}
 }
 
-void RotateInventory(int id)
+void RotateInventory(int id)//旋转物品栏物品
 {
 	if(id == Air);
 	else if(id == Redstone_Wire);
@@ -141,27 +142,19 @@ void RotateInventory(int id)
 		inventoryState[id].direction = (inventoryState[id].direction+1)%5;
 	}
 	else if(id == Redstone_Block);
-	else if(id == Redstone_Lamp)
-	{
-		//inventoryState[id].state = !(inventoryState[id].state);//debug
-	}
+	else if(id == Redstone_Lamp);
 	else if(id == Redstone_Repeater)
 	{
-		//inventoryState[id].state = !(inventoryState[id].state);//debug
 		inventoryState[id].direction = (inventoryState[id].direction+1)%4;
 	}
 	else if(id == Redstone_Comparator)
 	{
-		//inventoryState[id].state = !(inventoryState[id].state);//debug
 		inventoryState[id].direction = (inventoryState[id].direction+1)%4;
 	}
-	else if(id == Lever)
-	{
-		//inventoryState[id].state = !(inventoryState[id].state);//debug
-	}
+	else if(id == Lever);
 }
 
-void ResizeWorld(int h, int w)
+void ResizeWorld(int h, int w)//初始化或重置世界大小
 {
 	int r, c;
 	if(height != 0 && width != 0)
@@ -188,7 +181,7 @@ void ResizeWorld(int h, int w)
 	width = w;
 }
 
-void ResizeWindow(int length)
+void ResizeWindow(int length)//初始化或改变窗口大小
 {
 	blockSideLength = length;
 	heightOfInventory = 2*length;
@@ -200,7 +193,7 @@ void ResizeWindow(int length)
 	ege_enable_aa(true);
 }
 
-void DrawTorch(int x0, int y0, int state)
+void DrawTorch(int x0, int y0, int state)//绘制红石火把
 {
 	int x = x0-blockSideLength/2;
 	int y = y0-blockSideLength/2;
@@ -220,7 +213,7 @@ void DrawTorch(int x0, int y0, int state)
 	}
 }
 
-void DrawBlockID(int x, int y, int id, BlockState s)
+void DrawBlockID(int x, int y, int id, BlockState s)//绘制元件
 {
 	//标准方块边长16
 	if(id == Air);
@@ -346,8 +339,6 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 		//方向，0123朝向上右下左
 		if(s.state == 0) setfillcolor(Color[Color_RedstoneSignal_0]);
 		else setfillcolor(Color[Color_RedstoneSignal_15]);
-		if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);//debug
-		else setcolor(Color[Color_RedstoneSignal_15]);
 		if(s.direction == 0)
 		{
 			//上2*2，间隔7，下2*8
@@ -415,7 +406,8 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 	{
 		//4*6
 		setfillcolor(Color[Color_Wood]);
-		ege_fillrect(x+blockSideLength*5/16, y+blockSideLength*6/16, blockSideLength*6/16, blockSideLength*4/16);
+		if(s.state == 0) ege_fillrect(x+blockSideLength*5/16, y+blockSideLength*6/16, blockSideLength*6/16, blockSideLength*4/16);
+		else ege_fillrect(x+blockSideLength*6/16, y+blockSideLength*7/16, blockSideLength*6/16, blockSideLength*4/16);
 		//激活状态
 		if(showInformation)
 		{
@@ -428,7 +420,7 @@ void DrawBlockID(int x, int y, int id, BlockState s)
 	//xyprintf(x, y, "%d", id);
 }
 
-void DrawBlock(int r, int c)
+void DrawBlock(int r, int c)//绘制方块
 {
 	setfillcolor(Color[Color_Border]);
 	ege_fillrect(c*blockSideLength, r*blockSideLength, blockSideLength, blockSideLength);
@@ -437,7 +429,7 @@ void DrawBlock(int r, int c)
 	DrawBlockID(c*blockSideLength, r*blockSideLength, world[r][c], state[r][c]);
 }
 
-void DrawWorld(int mainhand)
+void DrawWorld(int mainhand)//绘制世界
 {
 	int r, c, i;
 	//清除旧世界，减少锯齿感
@@ -495,7 +487,7 @@ void DrawWorld(int mainhand)
 	}
 }
 
-void PutBlock(BlockID id, int r, int c)
+void PutBlock(BlockID id, int r, int c)//在单元格放置物品栏物品
 {
 	world[r][c] = id;
 	state[r][c] = inventoryState[id];
@@ -546,26 +538,30 @@ int IsConnected(int rt, int ct, int rs, int cs)//s为红石线，t是否连接
 	return 0;
 }
 
-void SpreadSignalOnWire(int r, int c)
+void SpreadSignalOnWire(int r, int c)//递归在红石线上传播信号
 {
 	int signal = state[r][c].redstoneSignal-1;
-	if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].redstoneSignal < signal)
+	if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].redstoneSignal < signal)//默认为0，不会向负数传播
 	{
+		state[r-1][c].state = 1;
 		state[r-1][c].redstoneSignal = signal;
 		SpreadSignalOnWire(r-1, c);
 	}
 	if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].redstoneSignal < signal)
 	{
+		state[r][c+1].state = 1;
 		state[r][c+1].redstoneSignal = signal;
 		SpreadSignalOnWire(r, c+1);
 	}
 	if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].redstoneSignal < signal)
 	{
+		state[r+1][c].state = 1;
 		state[r+1][c].redstoneSignal = signal;
 		SpreadSignalOnWire(r+1, c);
 	}
 	if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].redstoneSignal < signal)
 	{
+		state[r][c-1].state = 1;
 		state[r][c-1].redstoneSignal = signal;
 		SpreadSignalOnWire(r, c-1);
 	}
@@ -573,11 +569,12 @@ void SpreadSignalOnWire(int r, int c)
 
 void SpreadSignalToComponent(int r, int c, int rs, int cs)
 {
-	if(world[r][c] != Air && world[r][c] != Redstone_Wire)
+	if(world[r][c] != Air && world[r][c] != Redstone_Wire && state[r][c].redstoneTick+state[r][c].delay < currentTick)
 	{
 		if(world[r][c] == Redstone_Lamp)
 		{
 			state[r][c].state = 1;
+			state[r][c].redstoneTick = currentTick;
 		}
 		else if(world[r][c] == Redstone_Repeater)
 		{
@@ -587,6 +584,7 @@ void SpreadSignalToComponent(int r, int c, int rs, int cs)
 				|| (c == cs-1 && state[r][c].direction == 3))
 			{
 				state[r][c].state = 1;
+				state[r][c].redstoneTick = currentTick;
 			}
 		}
 		else if(world[r][c] == Redstone_Comparator)
@@ -597,31 +595,145 @@ void SpreadSignalToComponent(int r, int c, int rs, int cs)
 				|| (c == cs-1 && state[r][c].direction == 3))
 			{
 				state[r][c].state = 1;
+				state[r][c].redstoneTick = currentTick;
 			}
 		}
 	}
 }
 
-/*int IsReceivedSignal(int r, int c)
+void RunRedstoneRepeater(int r, int c)
 {
-	if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].redstoneSignal > 0)
+	if(state[r][c].state == 1)
 	{
-		return 1;
+		if(state[r][c].direction == 0)
+		{
+			if(r > 0)
+			{
+				if(world[r-1][c] == Redstone_Wire)
+				{
+					state[r-1][c].redstoneSignal = 15;
+					SpreadSignalOnWire(r-1, c);
+				}
+				else
+				{
+					SpreadSignalToComponent(r-1, c, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 1)
+		{
+			if(c+1 < width)
+			{
+				if(world[r][c+1] == Redstone_Wire)
+				{
+					state[r][c+1].redstoneSignal = 15;
+					SpreadSignalOnWire(r, c+1);
+				}
+				else
+				{
+					SpreadSignalToComponent(r, c+1, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 2)
+		{
+			if(r+1 < height)
+			{
+				if(world[r+1][c] == Redstone_Wire)
+				{
+					state[r+1][c].redstoneSignal = 15;
+					SpreadSignalOnWire(r+1, c);
+				}
+				else
+				{
+					SpreadSignalToComponent(r+1, c, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 3)
+		{
+			if(c > 0)
+			{
+				if(world[r][c-1] == Redstone_Wire)
+				{
+					state[r][c-1].redstoneSignal = 15;
+					SpreadSignalOnWire(r, c-1);
+				}
+				else
+				{
+					SpreadSignalToComponent(r, c-1, r, c);
+				}
+			}
+		}
 	}
-	if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].redstoneSignal > 0)
+}
+
+void RunRedstoneComparator(int r, int c)
+{
+	if(state[r][c].state == 1)
 	{
-		return 1;
+		if(state[r][c].direction == 0)
+		{
+			if(r > 0 && r+1 < height)
+			{
+				if(world[r-1][c] == Redstone_Wire)
+				{
+					state[r-1][c].redstoneSignal = state[r+1][c].redstoneSignal;
+					SpreadSignalOnWire(r-1, c);
+				}
+				else
+				{
+					SpreadSignalToComponent(r-1, c, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 1)
+		{
+			if(c > 0 && c+1 < width)
+			{
+				if(world[r][c+1] == Redstone_Wire)
+				{
+					state[r][c+1].redstoneSignal = state[r][c-1].redstoneSignal;
+					SpreadSignalOnWire(r, c+1);
+				}
+				else
+				{
+					SpreadSignalToComponent(r, c+1, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 2)
+		{
+			if(r > 0 && r+1 < height)
+			{
+				if(world[r+1][c] == Redstone_Wire)
+				{
+					state[r+1][c].redstoneSignal = state[r-1][c].redstoneSignal;
+					SpreadSignalOnWire(r+1, c);
+				}
+				else
+				{
+					SpreadSignalToComponent(r+1, c, r, c);
+				}
+			}
+		}
+		else if(state[r][c].direction == 3)
+		{
+			if(c > 0 && c+1 < width)
+			{
+				if(world[r][c-1] == Redstone_Wire)
+				{
+					state[r][c-1].redstoneSignal = state[r][c+1].redstoneSignal;
+					SpreadSignalOnWire(r, c-1);
+				}
+				else
+				{
+					SpreadSignalToComponent(r, c-1, r, c);
+				}
+			}
+		}
 	}
-	if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].redstoneSignal > 0)
-	{
-		return 1;
-	}
-	if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].redstoneSignal > 0)
-	{
-		return 1;
-	}
-	return 0;
-}*/
+}
 
 int IsSignalSource(int r, int c)
 {
@@ -647,94 +759,147 @@ int IsSignalSource(int r, int c)
 void UpdateWorld()
 {
 	int r, c;
-	for(r=0; r<height; r++)
-	{
-		for(c=0; c<width; c++)
-		{
-			if(world[r][c] != Air)
-			{
-				if(world[r][c] == Redstone_Wire)
-				{
-					state[r][c].direction = 0;//重置连接状态
-					if(r > 0 && IsConnected(r-1, c, r, c))
-					{
-						state[r][c].direction |= 8;
-						if(world[r-1][c] == Redstone_Wire) state[r-1][c].direction |= 2;
-					}
-					if(c+1 < width && IsConnected(r, c+1, r, c))
-					{
-						state[r][c].direction |= 4;
-						if(world[r][c+1] == Redstone_Wire) state[r][c+1].direction |= 1;
-					}
-					if(r+1 < height && IsConnected(r+1, c, r, c))
-					{
-						state[r][c].direction |= 2;
-						if(world[r+1][c] == Redstone_Wire) state[r+1][c].direction |= 8;
-					}
-					if(c > 0 && IsConnected(r, c-1, r, c))
-					{
-						state[r][c].direction |= 1;
-						if(world[r][c-1] == Redstone_Wire) state[r][c-1].direction |= 4;
-					}
-					state[r][c].redstoneSignal = 0;//重置信号
-				}
-				else if(world[r][c] == Redstone_Torch)
-				{
-					state[r][c].state = 0;
-				}
-				else if(world[r][c] == Redstone_Lamp)
-				{
-					state[r][c].state = 0;
-				}
-				else if(world[r][c] == Redstone_Repeater)
-				{
-					state[r][c].state = 0;
-				}
-				else if(world[r][c] == Redstone_Comparator)
-				{
-					state[r][c].state = 0;
-				}
-			}
-		}
-	}
-	//红石信号传播
-	for(r=0; r<height; r++)
-	{
-		for(c=0; c<width; c++)
-		{
-			if(IsSignalSource(r, c) && state[r][c].redstoneTick == currentTick)
-			{
-				if(r > 0 && world[r-1][c] == Redstone_Wire)
-				{
-					state[r-1][c].redstoneSignal = 15;
-					SpreadSignalOnWire(r-1, c);
-				}
-				if(c+1 < width && world[r][c+1] == Redstone_Wire)
-				{
-					state[r][c+1].redstoneSignal = 15;
-					SpreadSignalOnWire(r, c+1);
-				}
-				if(r+1 < height && world[r+1][c] == Redstone_Wire)
-				{
-					state[r+1][c].redstoneSignal = 15;
-					SpreadSignalOnWire(r+1, c);
-				}
-				if(c > 0 && world[r][c-1] == Redstone_Wire)
-				{
-					state[r][c-1].redstoneSignal = 15;
-					SpreadSignalOnWire(r, c-1);
-				}
-			}
-		}
-	}
-	//更新红石线的红石刻
+	//重置红石线连接状态
 	for(r=0; r<height; r++)
 	{
 		for(c=0; c<width; c++)
 		{
 			if(world[r][c] == Redstone_Wire)
 			{
-				state[r][c].redstoneTick = currentTick+1;
+				state[r][c].direction = 0;
+				if(r > 0 && IsConnected(r-1, c, r, c))
+				{
+					state[r][c].direction |= 8;
+					if(world[r-1][c] == Redstone_Wire) state[r-1][c].direction |= 2;
+				}
+				if(c+1 < width && IsConnected(r, c+1, r, c))
+				{
+					state[r][c].direction |= 4;
+					if(world[r][c+1] == Redstone_Wire) state[r][c+1].direction |= 1;
+				}
+				if(r+1 < height && IsConnected(r+1, c, r, c))
+				{
+					state[r][c].direction |= 2;
+					if(world[r+1][c] == Redstone_Wire) state[r+1][c].direction |= 8;
+				}
+				if(c > 0 && IsConnected(r, c-1, r, c))
+				{
+					state[r][c].direction |= 1;
+					if(world[r][c-1] == Redstone_Wire) state[r][c-1].direction |= 4;
+				}
+			}
+		}
+	}
+	//重置红石线信号
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(world[r][c] == Redstone_Wire)
+			{
+				state[r][c].redstoneSignal = 0;
+			}
+		}
+	}
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(IsSignalSource(r, c))
+			{
+				if(state[r][c].redstoneTick+state[r][c].delay < currentTick)//放置后一刻更新
+				{
+					if(r > 0 && world[r-1][c] == Redstone_Wire)
+					{
+						state[r-1][c].state = 1;
+						state[r-1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r-1, c);
+					}
+					if(c+1 < width && world[r][c+1] == Redstone_Wire)
+					{
+						state[r][c+1].state = 1;
+						state[r][c+1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c+1);
+					}
+					if(r+1 < height && world[r+1][c] == Redstone_Wire)
+					{
+						state[r+1][c].state = 1;
+						state[r+1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r+1, c);
+					}
+					if(c > 0 && world[r][c-1] == Redstone_Wire)
+					{
+						state[r][c-1].state = 1;
+						state[r][c-1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c-1);
+					}
+					//if(world[r][c] != Button) state[r][c].redstoneTick = currentTick;
+				}
+				else//维持激活红石线的能量
+				{
+					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].state == 1)
+					{
+						state[r-1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r-1, c);
+					}
+					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].state == 1)
+					{
+						state[r][c+1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c+1);
+					}
+					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].state == 1)
+					{
+						state[r+1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r+1, c);
+					}
+					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].state == 1)
+					{
+						state[r][c-1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c-1);
+					}
+				}
+			}
+		}
+	}
+	//元件功能
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(world[r][c] == Redstone_Repeater)
+			{
+				RunRedstoneRepeater(r, c);
+			}
+			else if(world[r][c] == Redstone_Comparator)
+			{
+				RunRedstoneComparator(r, c);
+			}
+		}
+	}
+	//熄灭过时元件
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(world[r][c] != Air && world[r][c] != Redstone_Wire)
+			{
+				if(world[r][c] == Redstone_Torch || world[r][c] == Redstone_Lamp
+					|| world[r][c] == Redstone_Repeater || world[r][c] == Redstone_Comparator)
+				{
+					if(state[r][c].state == 1 && state[r][c].redstoneTick+state[r][c].delay < currentTick)
+					{
+						state[r][c].state = 0;
+						//state[r][c].redstoneTick = currentTick;
+					}
+				}
+				else if(world[r][c] == Button)//按钮维持15刻(+1~+15)
+				{
+					if(state[r][c].state == 1 && state[r][c].redstoneTick+15 < currentTick)
+					{
+						state[r][c].state = 0;
+						state[r][c].redstoneTick = currentTick;
+					}
+				}
 			}
 		}
 	}
@@ -752,145 +917,15 @@ void UpdateWorld()
 			}
 		}
 	}
-	//元件功能
+	//更新红石线的红石刻
 	for(r=0; r<height; r++)
 	{
 		for(c=0; c<width; c++)
 		{
-			if(world[r][c] == Redstone_Repeater && state[r][c].state == 1)
+			if(world[r][c] == Redstone_Wire)
 			{
-				if(state[r][c].direction == 0)
-				{
-					if(r > 0)
-					{
-						if(world[r-1][c] == Redstone_Wire)
-						{
-							state[r-1][c].redstoneSignal = 15;
-							SpreadSignalOnWire(r-1, c);
-						}
-						else
-						{
-							SpreadSignalToComponent(r-1, c, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 1)
-				{
-					if(c+1 < width)
-					{
-						if(world[r][c+1] == Redstone_Wire)
-						{
-							state[r][c+1].redstoneSignal = 15;
-							SpreadSignalOnWire(r, c+1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c+1, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 2)
-				{
-					if(r+1 < height)
-					{
-						if(world[r+1][c] == Redstone_Wire)
-						{
-							state[r+1][c].redstoneSignal = 15;
-							SpreadSignalOnWire(r+1, c);
-						}
-						else
-						{
-							SpreadSignalToComponent(r+1, c, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 3)
-				{
-					if(c > 0)
-					{
-						if(world[r][c-1] == Redstone_Wire)
-						{
-							state[r][c-1].redstoneSignal = 15;
-							SpreadSignalOnWire(r, c-1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c-1, r, c);
-						}
-					}
-				}
+				state[r][c].redstoneTick = currentTick+1;
 			}
-			else if(world[r][c] == Redstone_Comparator && state[r][c].state == 1)
-			{
-				if(state[r][c].direction == 0)
-				{
-					if(r > 0 && r+1 < height)
-					{
-						if(world[r-1][c] == Redstone_Wire)
-						{
-							state[r-1][c].redstoneSignal = state[r+1][c].redstoneSignal;
-							SpreadSignalOnWire(r-1, c);
-						}
-						else
-						{
-							SpreadSignalToComponent(r-1, c, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 1)
-				{
-					if(c > 0 && c+1 < width)
-					{
-						if(world[r][c+1] == Redstone_Wire)
-						{
-							state[r][c+1].redstoneSignal = state[r][c-1].redstoneSignal;
-							SpreadSignalOnWire(r, c+1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c+1, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 2)
-				{
-					if(r > 0 && r+1 < height)
-					{
-						if(world[r+1][c] == Redstone_Wire)
-						{
-							state[r+1][c].redstoneSignal = state[r-1][c].redstoneSignal;
-							SpreadSignalOnWire(r+1, c);
-						}
-						else
-						{
-							SpreadSignalToComponent(r+1, c, r, c);
-						}
-					}
-				}
-				else if(state[r][c].direction == 3)
-				{
-					if(c > 0 && c+1 < width)
-					{
-						if(world[r][c-1] == Redstone_Wire)
-						{
-							state[r][c-1].redstoneSignal = state[r][c+1].redstoneSignal;
-							SpreadSignalOnWire(r, c-1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c-1, r, c);
-						}
-					}
-				}
-			}
-		}
-	}
-	//更新全局红石刻
-	for(r=0; r<height; r++)
-	{
-		for(c=0; c<width; c++)
-		{
-			state[r][c].redstoneTick = currentTick+1;
 		}
 	}
 }
@@ -960,9 +995,8 @@ int main()
 						}
 						else if(world[r][c] == Button)
 						{
-							//state[r][c].state = 1;
-							//延时
-							state[r][c].state = !(state[r][c].state);
+							state[r][c].state = 1;
+							state[r][c].redstoneTick = currentTick;//延时
 						}
 					}
 					else if(mouseMsg.is_left())
@@ -1025,6 +1059,13 @@ Minecraft Redstone Simulator 0.3
 ——新增 按下的拉杆和按钮可以点亮红石线
 ——优化 现在红石线不会与红石中继器的侧边连接
 ——优化 反转滚轮切换物品栏方向
-//——新增 按钮弹起
+Minecraft Redstone Simulator 0.4
+——新增 按钮弹起
+——优化 更明显的显示按钮处于按下状态
+——优化 调整红石运行逻辑
 //——修复 激活的红石中继器、红石比较器的输出红石线不能激活红石元件
+//——修复 红石中继器、红石比较器不能向左上方向连续激活
+//——修复 连续的红石中继器、红石比较器瞬间向右下方向激活
+//——修复 红石比较器不能激活红石线
+//——修复 红石中继器激活总是1刻延迟
 --------------------------------*/
