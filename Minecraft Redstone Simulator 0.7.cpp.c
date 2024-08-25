@@ -22,11 +22,12 @@ typedef struct _BlockState
 	int state;//状态
 	int direction;//方向
 	int onBlock;//空气、红石线、红石火把、拉杆、按钮是否位于方块上
-	int delay;//延时红石刻，红石线为0，红石中继器为1-4，其他为1
+	int delay;//红石中继器的延时红石刻(1-4)
 	char mode;//红石比较器的模式(c比较m减法)
 	
 	int redstoneSignal;//红石信号强度(0-15)
 	int redstoneTick;//元件改变状态的红石刻(0.1s)
+	int energyLevel;//方块充能等级(1弱充能2强充能)
 	int sideInput;//红石比较器侧面输入的红石信号强度
 	int isLocked;//红石中继器是否被锁定
 }BlockState;
@@ -117,6 +118,7 @@ void InitInventory()//设置所有元件默认状态
 		inventoryState[i].mode = 0;
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = -1;
+		inventoryState[i].energyLevel = 0;
 		inventoryState[i].sideInput = 0;
 		inventoryState[i].isLocked = 0;
 		if(i == Air)
@@ -134,6 +136,7 @@ void InitInventory()//设置所有元件默认状态
 		else if(i == Redstone_Block)
 		{
 			inventoryState[i].redstoneSignal = 15;
+			inventoryState[i].redstoneSignal = 2;
 		}
 		else if(i == Redstone_Lamp);
 		else if(i == Redstone_Repeater);
@@ -459,6 +462,7 @@ void DrawBlockID(int x, int y, int id, BlockState s)//绘制元件
 	//setcolor(Color[Color_Border]);
 	//xyprintf(x, y, "%d", id);
 	//xyprintf(x, y, "%d", s.onBlock);
+	//xyprintf(x, y, "%d", s.energyLevel);
 }
 
 void DrawBlock(int r, int c)//绘制方块
@@ -570,7 +574,7 @@ void PutBlock(BlockID id, int r, int c)//在单元格放置物品栏物品
 				if(r+1 < height && state[r+1][c].onBlock);
 				else state[r][c].direction = 0;
 			}
-			else if(inventoryState[Redstone_Torch].direction == 2)
+			else if(inventoryState[Redstone_Torch].direction == 4)
 			{
 				if(c > 0 && state[r][c-1].onBlock);
 				else state[r][c].direction = 0;
@@ -678,20 +682,113 @@ void SpreadSignalOnWire(int r, int c)//递归在红石线上传播信号
 
 void SpreadSignalToComponent(int rt, int ct, int rs, int cs)
 {
-	if(world[rt][ct] != Air && world[rt][ct] != Redstone_Wire)
+	if(world[rt][ct] != Air && world[rt][ct] != Redstone_Wire && state[rs][cs].onBlock == state[rt][ct].onBlock)
 	{
-		/*if(world[rt][ct] == Redstone_Torch)
+		if(world[rt][ct] == Redstone_Lamp)
 		{
-			if((rt == rs-1 && state[rt][ct].direction == 3)
+			newState[rt][ct].state = 1;
+		}
+		else if(world[rt][ct] == Redstone_Repeater)
+		{
+			if((rt == rs-1 && state[rt][ct].direction == 0)
 				|| (ct == cs+1 && state[rt][ct].direction == 1)
-				|| (rt == rs+1 && state[rt][ct].direction == 4)
-				|| (ct == cs-1 && state[rt][ct].direction == 2))
+				|| (rt == rs+1 && state[rt][ct].direction == 2)
+				|| (ct == cs-1 && state[rt][ct].direction == 3))
+			{
+				newState[rt][ct].state = 1;
+				newState[rt][ct].redstoneSignal = 15;
+			}
+			if(world[rs][cs] == Redstone_Repeater || world[rs][cs] == Redstone_Comparator)
+			{
+				if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
+				{
+					if(rt == rs && (ct == cs-1 || ct == cs+1))
+					{
+						if((state[rs][cs].direction == 1 && ct == cs+1)
+							|| (state[rs][cs].direction == 3 && ct == cs-1))
+						{
+							newState[rt][ct].isLocked = 1;
+						}
+					}
+				}
+				else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
+				{
+					if((rt == rs-1 || rt == rs+1) && ct == cs)
+					{
+						if((state[rs][cs].direction == 0 && rt == rs-1)
+							|| (state[rs][cs].direction == 2 && rt == rs+1))
+						{
+							newState[rt][ct].isLocked = 1;
+						}
+					}
+				}
+			}
+		}
+		else if(world[rt][ct] == Redstone_Comparator)
+		{
+			if((rt == rs-1 && state[rt][ct].direction == 0)
+				|| (ct == cs+1 && state[rt][ct].direction == 1)
+				|| (rt == rs+1 && state[rt][ct].direction == 2)
+				|| (ct == cs-1 && state[rt][ct].direction == 3))
+			{
+				newState[rt][ct].state = 1;
+				newState[rt][ct].redstoneSignal = state[rs][cs].redstoneSignal;
+				//默认激活且输出后面信号
+				if(state[rt][ct].mode == 'c')//如果侧边信号大于输入，不输出
+				{
+					if(state[rt][ct].sideInput > newState[rt][ct].redstoneSignal)
+					{
+						newState[rt][ct].state = 0;
+						newState[rt][ct].redstoneSignal = 0;
+					}
+				}
+				else if(state[rt][ct].mode == 'm')
+				{
+					if(state[rt][ct].sideInput >= newState[rt][ct].redstoneSignal)
+					{
+						newState[rt][ct].state = 0;
+						newState[rt][ct].redstoneSignal = 0;
+					}
+					else
+					{
+						newState[rt][ct].redstoneSignal -= state[rt][ct].sideInput;
+					}
+				}
+			}
+			if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
+			{
+				if(rt == rs && (ct == cs-1 || ct == cs+1))
+				{
+					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+				}
+			}
+			else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
+			{
+				if((rt == rs-1 || rt == rs+1) && ct == cs)
+				{
+					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+				}
+			}
+		}
+	}
+}
+
+void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
+{
+	if(world[rt][ct] != Air && world[rt][ct] != Redstone_Wire && state[rt][ct].onBlock == 0)
+	{
+		if(world[rt][ct] == Redstone_Torch)
+		{
+			if((rs == rt-1 && state[rt][ct].direction == 1)
+				|| (cs == ct+1 && state[rt][ct].direction == 2)
+				|| (rs == rt+1 && state[rt][ct].direction == 3)
+				|| (cs == ct-1 && state[rt][ct].direction == 4))
 			{
 				newState[rt][ct].state = 1;
 				newState[rt][ct].redstoneSignal = 0;
 			}
 		}
-		else */if(world[rt][ct] == Redstone_Lamp)
+		else if(world[rt][ct] == Redstone_Lamp)
 		{
 			newState[rt][ct].state = 1;
 		}
@@ -820,6 +917,20 @@ void UpdateWorld()//根据t-1状态计算t状态
 			}
 		}
 	}
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(world[r][c] == Redstone_Wire)
+			{
+				if(state[r][c].direction == 0) state[r][c].direction = 15;
+				else if(state[r][c].direction == 8) state[r][c].direction |= 2;
+				else if(state[r][c].direction == 4) state[r][c].direction |= 1;
+				else if(state[r][c].direction == 2) state[r][c].direction |= 8;
+				else if(state[r][c].direction == 1) state[r][c].direction |= 4;
+			}
+		}
+	}
 	//全部保存至新状态
 	for(r=0; r<height; r++)
 	{
@@ -828,6 +939,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 			newState[r][c] = state[r][c];
 			newState[r][c].state = 0;//重置元件为默认状态
 			newState[r][c].redstoneSignal = 0;
+			newState[r][c].energyLevel = 0;
 			newState[r][c].sideInput = 0;
 			newState[r][c].isLocked = 0;
 		}
@@ -838,11 +950,11 @@ void UpdateWorld()//根据t-1状态计算t状态
 		for(c=0; c<width; c++)
 		{
 			//根据旧状态计算新状态
-			if((world[r][c] == Redstone_Torch && state[r][c].state == 0)
-				|| world[r][c] == Redstone_Block
+			if(world[r][c] == Redstone_Block
 				|| (world[r][c] == Lever && state[r][c].state == 1)
 				|| (world[r][c] == Button && state[r][c].state == 1))//电源作用
 			{
+				newState[r][c].energyLevel = 2;//强充能所在方块
 				//尝试激活附近红石线
 				newState[r][c].redstoneSignal = 16;
 				SpreadSignalOnWire(r, c);
@@ -855,6 +967,60 @@ void UpdateWorld()//根据t-1状态计算t状态
 			}
 			else if(world[r][c] == Redstone_Wire && state[r][c].state == 1)//激活红石线作用
 			{
+				newState[r][c].energyLevel = 1;//弱充能所在方块
+				//尝试激活附近部件
+				if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
+				if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
+				if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
+				if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
+				//弱充能指向方块
+				if(state[r][c].onBlock == 0)
+				{
+					if(state[r][c].direction & 8 && r > 0 && state[r-1][c].onBlock)
+					{
+						newState[r-1][c].energyLevel = 1;
+					}
+					if(state[r][c].direction & 4 && c+1 < width && state[r][c+1].onBlock)
+					{
+						newState[r][c+1].energyLevel = 1;
+					}
+					if(state[r][c].direction & 2 && r+1 < height && state[r+1][c].onBlock)
+					{
+						newState[r+1][c].energyLevel = 1;
+					}
+					if(state[r][c].direction & 1 && c > 0 && state[r][c-1].onBlock)
+					{
+						newState[r][c-1].energyLevel = 1;
+					}
+				}
+			}
+			else if(world[r][c] == Redstone_Torch && state[r][c].state == 0)
+			{
+				//尝试激活同层红石线
+				if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == state[r][c].onBlock)
+				{
+					newState[r-1][c].state = 1;
+					newState[r-1][c].redstoneSignal = 15;
+					SpreadSignalOnWire(r-1, c);
+				}
+				if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == state[r][c].onBlock)
+				{
+					newState[r][c+1].state = 1;
+					newState[r][c+1].redstoneSignal = 15;
+					SpreadSignalOnWire(r, c+1);
+				}
+				if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == state[r][c].onBlock)
+				{
+					newState[r+1][c].state = 1;
+					newState[r+1][c].redstoneSignal = 15;
+					SpreadSignalOnWire(r+1, c);
+				}
+				if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == state[r][c].onBlock)
+				{
+					newState[r][c-1].state = 1;
+					newState[r][c-1].redstoneSignal = 15;
+					SpreadSignalOnWire(r, c-1);
+				}
 				//尝试激活附近部件
 				if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
 				if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
@@ -867,6 +1033,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(r > 0)
 					{
+						newState[r-1][c].energyLevel = 2;//强充能对应方块
 						if(world[r-1][c] == Redstone_Wire)//点亮的中继器1延迟点亮红石线
 						{
 							newState[r-1][c].state = 1;
@@ -883,6 +1050,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(c+1 < width)
 					{
+						newState[r][c+1].energyLevel = 2;
 						if(world[r][c+1] == Redstone_Wire)
 						{
 							newState[r][c+1].state = 1;
@@ -899,6 +1067,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(r+1 < height)
 					{
+						newState[r+1][c].energyLevel = 2;
 						if(world[r+1][c] == Redstone_Wire)
 						{
 							newState[r+1][c].state = 1;
@@ -915,6 +1084,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(c > 0)
 					{
+						newState[r][c-1].energyLevel = 2;
 						if(world[r][c-1] == Redstone_Wire)
 						{
 							newState[r][c-1].state = 1;
@@ -934,6 +1104,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(r > 0)
 					{
+						newState[r-1][c].energyLevel = 2;
 						if(world[r-1][c] == Redstone_Wire)
 						{
 							newState[r-1][c].state = 1;
@@ -950,6 +1121,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(c+1 < width)
 					{
+						newState[r][c+1].energyLevel = 2;
 						if(world[r][c+1] == Redstone_Wire)
 						{
 							newState[r][c+1].state = 1;
@@ -966,6 +1138,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(r+1 < height)
 					{
+						newState[r+1][c].energyLevel = 2;
 						if(world[r+1][c] == Redstone_Wire)
 						{
 							newState[r+1][c].state = 1;
@@ -982,6 +1155,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 				{
 					if(c > 0)
 					{
+						newState[r][c-1].energyLevel = 2;
 						if(world[r][c-1] == Redstone_Wire)
 						{
 							newState[r][c-1].state = 1;
@@ -994,6 +1168,54 @@ void UpdateWorld()//根据t-1状态计算t状态
 						}
 					}
 				}
+			}
+		}
+	}
+	//充能方块作用
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(state[r][c].onBlock && state[r][c].energyLevel > 0)
+			{
+				if(world[r][c] == Redstone_Torch)
+				{
+					newState[r][c].state = 1;
+					newState[r][c].redstoneSignal = 0;
+				}
+				if(state[r][c].energyLevel == 2)
+				{
+					//尝试激活附近红石线
+					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == 0)
+					{
+						newState[r-1][c].state = 1;
+						newState[r-1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r-1, c);
+					}
+					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == 0)
+					{
+						newState[r][c+1].state = 1;
+						newState[r][c+1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c+1);
+					}
+					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == 0)
+					{
+						newState[r+1][c].state = 1;
+						newState[r+1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r+1, c);
+					}
+					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == 0)
+					{
+						newState[r][c-1].state = 1;
+						newState[r][c-1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c-1);
+					}
+				}
+				//尝试激活附近部件
+				if(r > 0) SpreadEnergyToComponent(r-1, c, r, c);
+				if(c+1 < width) SpreadEnergyToComponent(r, c+1, r, c);
+				if(r+1 < height) SpreadEnergyToComponent(r+1, c, r, c);
+				if(c > 0) SpreadEnergyToComponent(r, c-1, r, c);
 			}
 		}
 	}
@@ -1010,10 +1232,10 @@ void UpdateWorld()//根据t-1状态计算t状态
 				}
 				else//新旧状态不同
 				{
-					newState[r][c].state = state[r][c].state;
+					if(state[r][c].delay > 1) newState[r][c].state = state[r][c].state;
 					if(state[r][c].redstoneTick == -1)
 					{
-						newState[r][c].redstoneTick = currentTick + state[r][c].delay;//记录改变刻
+						newState[r][c].redstoneTick = currentTick + state[r][c].delay-1;//记录改变刻
 					}
 				}
 				if(state[r][c].redstoneTick == currentTick)
@@ -1199,6 +1421,15 @@ Minecraft Redstone Simulator 0.6
 ——新增 放置与破坏方块
 ——新增 连接方块侧壁的红石火把放置时必须存在对应方块
 ——修复 红石中继器激活总是1刻延迟
-//——新增 位于方块上或连接方块侧壁的红石火把对应方块被充能时熄灭
+Minecraft Redstone Simulator 0.7
+——新增 红石线无连接时自动全部连接，单向连接时增加反向连接
+——新增 电源强充能所在方块
+——新增 红石线弱充能所在方块
+——新增 不位于方块上的红石线弱充能指向方块
+——新增 位于方块上或连接方块侧壁的红石火把对应方块被充能时熄灭
+——优化 现在红石火把只能激活同层红石线
+——优化 1刻红石中继器与红石比较器的延迟统一
+——修复 连接左侧方块侧壁的红石火把不存在对应方块时可以放置
+//——新增 红石比较器的输入是充能方块时可追溯能量源的红石信号
 //——优化 调整红石延时逻辑
 --------------------------------*/
