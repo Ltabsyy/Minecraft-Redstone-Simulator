@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <graphics.h>//链接参数-mwindows
 
@@ -19,17 +20,19 @@ int numberOfBlockType = 9;
 
 typedef struct _BlockState
 {
-	int state;//状态
+	//方块属性
 	int direction;//方向
 	int onBlock;//空气、红石线、红石火把、拉杆、按钮是否位于方块上
 	int delay;//红石中继器的延时红石刻(1-4)
 	char mode;//红石比较器的模式(c比较m减法)
-	
+	//红石状态
+	int state;//状态
 	int redstoneSignal;//红石信号强度(0-15)
 	int redstoneTick;//元件改变状态的红石刻(0.1s)
 	int energyLevel;//方块充能等级(1弱充能2强充能)
 	int sideInput;//红石比较器侧面输入的红石信号强度
 	int isLocked;//红石中继器是否被锁定
+	int blockSignal;//方块充能时的红石信号强度
 }BlockState;
 
 enum ColorElem
@@ -102,6 +105,8 @@ int width = 0;
 int blockSideLength = 0;
 int heightOfInventory = 0;
 int currentTick = 0;
+//int cameraR = 0;
+//int cameraC = 0;
 int showInformation = 0;
 //int showStep = 0;
 
@@ -111,16 +116,17 @@ void InitInventory()//设置所有元件默认状态
 	inventoryState =(BlockState*) calloc(numberOfBlockType, sizeof(BlockState));
 	for(i=0; i<numberOfBlockType; i++)
 	{
-		inventoryState[i].state = 0;
 		inventoryState[i].direction = 0;
 		inventoryState[i].onBlock = 0;
 		inventoryState[i].delay = 1;
 		inventoryState[i].mode = 0;
+		inventoryState[i].state = 0;
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = -1;
 		inventoryState[i].energyLevel = 0;
 		inventoryState[i].sideInput = 0;
 		inventoryState[i].isLocked = 0;
+		inventoryState[i].blockSignal = 0;
 		if(i == Air)
 		{
 			inventoryState[i].onBlock = 1;
@@ -136,7 +142,7 @@ void InitInventory()//设置所有元件默认状态
 		else if(i == Redstone_Block)
 		{
 			inventoryState[i].redstoneSignal = 15;
-			inventoryState[i].redstoneSignal = 2;
+			inventoryState[i].energyLevel = 2;
 		}
 		else if(i == Redstone_Lamp);
 		else if(i == Redstone_Repeater);
@@ -197,13 +203,74 @@ void ResizeWorld(int h, int w)//初始化或重置世界大小
 	width = w;
 }
 
+int ReadWorld(const char* fileName)
+{
+	FILE* file;
+	int r, c;
+	BlockID worldTemp;
+	BlockState stateTemp;
+	if((file = fopen(fileName, "r")))
+	{
+		fscanf(file, "size:%d*%d\n", &r, &c);
+		ResizeWorld(r, c);
+		while(fscanf(file, "\n%d %d %d %d %d", &r, &c, &worldTemp, &(stateTemp.direction), &(stateTemp.onBlock)) != EOF)
+		{
+			world[r][c] = worldTemp;
+			state[r][c].direction = stateTemp.direction;
+			state[r][c].onBlock = stateTemp.onBlock;
+			if(worldTemp == Redstone_Repeater)
+			{
+				fscanf(file, " %d", &(stateTemp.delay));
+				state[r][c].delay = stateTemp.delay;
+			}
+			else if(worldTemp == Redstone_Comparator)
+			{
+				fscanf(file, " %d", &(stateTemp.delay));
+				if(stateTemp.delay) state[r][c].mode = 'm';
+				else state[r][c].mode = 'c';
+			}
+		}
+		fclose(file);
+		return 1;
+	}
+	return 0;
+}
+
+void WriteWorld()
+{
+	FILE* file;
+	int r, c;
+	file = fopen("mcrs-world.txt", "w");
+	fprintf(file, "size:%d*%d\n", height, width);
+	for(r=0; r<height; r++)
+	{
+		for(c=0; c<width; c++)
+		{
+			if(world[r][c] == Air && state[r][c].onBlock == 0);//跳过空气
+			else
+			{
+				fprintf(file, "\n%d %d %d %d %d", r, c, world[r][c], state[r][c].direction, state[r][c].onBlock);
+				if(world[r][c] == Redstone_Repeater)
+				{
+					fprintf(file, " %d", state[r][c].delay);
+				}
+				else if(world[r][c] == Redstone_Comparator)
+				{
+					fprintf(file, " %d", (state[r][c].mode == 'm'));
+				}
+			}
+		}
+	}
+	fclose(file);
+}
+
 void ResizeWindow(int length)//初始化或改变窗口大小
 {
 	blockSideLength = length;
 	heightOfInventory = 2*length;
 	setcaption("Minecraft Redstone Simulator");
 	SetProcessDPIAware();//避免Windows缩放造成模糊
-	initgraph(width*blockSideLength, height*blockSideLength+heightOfInventory, INIT_RENDERMANUAL);
+	initgraph(width*blockSideLength, height*blockSideLength+heightOfInventory, INIT_RENDERMANUAL | INIT_NOFORCEEXIT);
 	setfont(blockSideLength/2, 0, "Consolas");
 	setbkmode(TRANSPARENT);//默认设置为无背景字体
 	ege_enable_aa(true);
@@ -755,18 +822,22 @@ void SpreadSignalToComponent(int rt, int ct, int rs, int cs)
 					}
 				}
 			}
-			if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
+			//只有红石线，红石中继器，红石比较器会产生红石比较器的侧边输入
+			if(world[rs][cs] == Redstone_Wire || world[rs][cs] == Redstone_Repeater || world[rs][cs] == Redstone_Comparator)
 			{
-				if(rt == rs && (ct == cs-1 || ct == cs+1))
+				if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
 				{
-					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+					if(rt == rs && (ct == cs-1 || ct == cs+1))
+					{
+						newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+					}
 				}
-			}
-			else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
-			{
-				if((rt == rs-1 || rt == rs+1) && ct == cs)
+				else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
 				{
-					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+					if((rt == rs-1 || rt == rs+1) && ct == cs)
+					{
+						newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+					}
 				}
 			}
 		}
@@ -836,7 +907,15 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 				|| (ct == cs-1 && state[rt][ct].direction == 3))
 			{
 				newState[rt][ct].state = 1;
-				newState[rt][ct].redstoneSignal = state[rs][cs].redstoneSignal;
+				//获取输入信号
+				if(state[rs][cs].onBlock == 0)
+				{
+					newState[rt][ct].redstoneSignal = state[rs][cs].redstoneSignal;
+				}
+				else//输入为充能方块时
+				{
+					newState[rt][ct].redstoneSignal = state[rs][cs].blockSignal;
+				}
 				//默认激活且输出后面信号
 				if(state[rt][ct].mode == 'c')//如果侧边信号大于输入，不输出
 				{
@@ -859,20 +938,7 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 					}
 				}
 			}
-			if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
-			{
-				if(rt == rs && (ct == cs-1 || ct == cs+1))
-				{
-					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
-				}
-			}
-			else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
-			{
-				if((rt == rs-1 || rt == rs+1) && ct == cs)
-				{
-					newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
-				}
-			}
+			//充能方块不会产生红石比较器的侧边输入
 		}
 	}
 }
@@ -939,7 +1005,9 @@ void UpdateWorld()//根据t-1状态计算t状态
 			newState[r][c] = state[r][c];
 			newState[r][c].state = 0;//重置元件为默认状态
 			newState[r][c].redstoneSignal = 0;
+			if(world[r][c] == Redstone_Torch || world[r][c] == Redstone_Block) newState[r][c].redstoneSignal = 15;
 			newState[r][c].energyLevel = 0;
+			if(world[r][c] == Redstone_Block) newState[r][c].energyLevel = 2;
 			newState[r][c].sideInput = 0;
 			newState[r][c].isLocked = 0;
 		}
@@ -979,18 +1047,22 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(state[r][c].direction & 8 && r > 0 && state[r-1][c].onBlock)
 					{
 						newState[r-1][c].energyLevel = 1;
+						newState[r-1][c].blockSignal = state[r][c].redstoneSignal;
 					}
 					if(state[r][c].direction & 4 && c+1 < width && state[r][c+1].onBlock)
 					{
 						newState[r][c+1].energyLevel = 1;
+						newState[r][c+1].blockSignal = state[r][c].redstoneSignal;
 					}
 					if(state[r][c].direction & 2 && r+1 < height && state[r+1][c].onBlock)
 					{
 						newState[r+1][c].energyLevel = 1;
+						newState[r+1][c].blockSignal = state[r][c].redstoneSignal;
 					}
 					if(state[r][c].direction & 1 && c > 0 && state[r][c-1].onBlock)
 					{
 						newState[r][c-1].energyLevel = 1;
+						newState[r][c-1].blockSignal = state[r][c].redstoneSignal;
 					}
 				}
 			}
@@ -1034,6 +1106,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(r > 0)
 					{
 						newState[r-1][c].energyLevel = 2;//强充能对应方块
+						newState[r-1][c].blockSignal = 15;
 						if(world[r-1][c] == Redstone_Wire)//点亮的中继器1延迟点亮红石线
 						{
 							newState[r-1][c].state = 1;
@@ -1051,6 +1124,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(c+1 < width)
 					{
 						newState[r][c+1].energyLevel = 2;
+						newState[r][c+1].blockSignal = 15;
 						if(world[r][c+1] == Redstone_Wire)
 						{
 							newState[r][c+1].state = 1;
@@ -1068,6 +1142,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(r+1 < height)
 					{
 						newState[r+1][c].energyLevel = 2;
+						newState[r+1][c].blockSignal = 15;
 						if(world[r+1][c] == Redstone_Wire)
 						{
 							newState[r+1][c].state = 1;
@@ -1085,6 +1160,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(c > 0)
 					{
 						newState[r][c-1].energyLevel = 2;
+						newState[r][c-1].blockSignal = 15;
 						if(world[r][c-1] == Redstone_Wire)
 						{
 							newState[r][c-1].state = 1;
@@ -1105,6 +1181,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(r > 0)
 					{
 						newState[r-1][c].energyLevel = 2;
+						newState[r-1][c].blockSignal = state[r][c].redstoneSignal;
 						if(world[r-1][c] == Redstone_Wire)
 						{
 							newState[r-1][c].state = 1;
@@ -1122,6 +1199,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(c+1 < width)
 					{
 						newState[r][c+1].energyLevel = 2;
+						newState[r][c+1].blockSignal = state[r][c].redstoneSignal;
 						if(world[r][c+1] == Redstone_Wire)
 						{
 							newState[r][c+1].state = 1;
@@ -1139,6 +1217,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(r+1 < height)
 					{
 						newState[r+1][c].energyLevel = 2;
+						newState[r+1][c].blockSignal = state[r][c].redstoneSignal;
 						if(world[r+1][c] == Redstone_Wire)
 						{
 							newState[r+1][c].state = 1;
@@ -1156,6 +1235,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(c > 0)
 					{
 						newState[r][c-1].energyLevel = 2;
+						newState[r][c-1].blockSignal = state[r][c].redstoneSignal;
 						if(world[r][c-1] == Redstone_Wire)
 						{
 							newState[r][c-1].state = 1;
@@ -1189,25 +1269,25 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == 0)
 					{
 						newState[r-1][c].state = 1;
-						newState[r-1][c].redstoneSignal = 15;
+						newState[r-1][c].redstoneSignal = state[r][c].blockSignal;
 						SpreadSignalOnWire(r-1, c);
 					}
 					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == 0)
 					{
 						newState[r][c+1].state = 1;
-						newState[r][c+1].redstoneSignal = 15;
+						newState[r][c+1].redstoneSignal = state[r][c].blockSignal;
 						SpreadSignalOnWire(r, c+1);
 					}
 					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == 0)
 					{
 						newState[r+1][c].state = 1;
-						newState[r+1][c].redstoneSignal = 15;
+						newState[r+1][c].redstoneSignal = state[r][c].blockSignal;
 						SpreadSignalOnWire(r+1, c);
 					}
 					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == 0)
 					{
 						newState[r][c-1].state = 1;
-						newState[r][c-1].redstoneSignal = 15;
+						newState[r][c-1].redstoneSignal = state[r][c].blockSignal;
 						SpreadSignalOnWire(r, c-1);
 					}
 				}
@@ -1269,17 +1349,18 @@ void UpdateWorld()//根据t-1状态计算t状态
 	state = newState;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
 	int r, c;
 	int mainhand = 0;
 	mouse_msg mouseMsg;
 	key_msg keyMsg;
 	InitInventory();
-	ResizeWorld(18, 32);
+	if(argc == 2) ReadWorld(argv[1]);
+	else if(ReadWorld("mcrs-world.txt") == 0) ResizeWorld(18, 32);
 	ResizeWindow(32);
 	setbkcolor(Color[Color_BackGround]);
-	while(1)
+	while(is_run())
 	{
 		//更新世界
 		UpdateWorld();
@@ -1385,6 +1466,7 @@ int main()
 		currentTick++;
 		//if(showStep == 1) getch();
 	}
+	WriteWorld();
 	closegraph();
 	return 0;
 }
@@ -1430,6 +1512,15 @@ Minecraft Redstone Simulator 0.7
 ——优化 现在红石火把只能激活同层红石线
 ——优化 1刻红石中继器与红石比较器的延迟统一
 ——修复 连接左侧方块侧壁的红石火把不存在对应方块时可以放置
-//——新增 红石比较器的输入是充能方块时可追溯能量源的红石信号
+Minecraft Redstone Simulator 0.8
+——新增 退出时保存地图
+——新增 可将地图文件拖动至程序图标打开
+——新增 打开游戏时自动打开上一次地图
+——新增 充能方块具有方块红石信号
+——新增 红石比较器的输入是充能方块时输入为方块红石信号
+——新增 强充能方块根据方块红石信号点亮附近红石线
+——优化 现在只有红石线，红石中继器，红石比较器会产生红石比较器的侧边输入
+——修复 红石比较器的输入是红石火把时输出红石线亮起后熄灭
 //——优化 调整红石延时逻辑
+//——修复 充能方块激活的红石中继器或红石比较器充能的方块附近的红石线频闪
 --------------------------------*/
