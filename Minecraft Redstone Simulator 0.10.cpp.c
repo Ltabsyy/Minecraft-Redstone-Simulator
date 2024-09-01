@@ -30,6 +30,7 @@ typedef struct _BlockState
 	int redstoneSignal;//红石信号强度(0-15)
 	int redstoneTick;//元件改变状态的红石刻(0.1s)
 	int energyLevel;//方块充能等级(1弱充能2强充能3强弱混合充能)
+	int mainInput;//红石比较器后面输入的红石信号强度
 	int sideInput;//红石比较器侧面输入的红石信号强度
 	int isLocked;//红石中继器是否被锁定
 	int weakChargingSignal;//方块被弱充能的红石信号强度
@@ -125,6 +126,7 @@ void InitInventory()//设置所有元件默认状态
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = -1;
 		inventoryState[i].energyLevel = 0;
+		inventoryState[i].mainInput = 0;
 		inventoryState[i].sideInput = 0;
 		inventoryState[i].isLocked = 0;
 		inventoryState[i].weakChargingSignal = 0;
@@ -607,6 +609,8 @@ void DrawWorld(int mainhand)//绘制世界
 		setcolor(Color[Color_InventoryNumber]);
 		xyprintf(0, height*blockSideLength, "RedstoneTick:%d", currentTick);
 		xyprintf(0, height*blockSideLength+blockSideLength*3/8, "Position:%d,%d", r, c);
+		//if(state[r][c].onBlock) xyprintf(0, height*blockSideLength+blockSideLength*6/8, "EnergyLevel:%d", state[r][c].energyLevel);
+		//if(world[r][c] == Redstone_Comparator) xyprintf(0, height*blockSideLength+blockSideLength*6/8, "AB:%d,%d", state[r][c].redstoneSignal, state[r][c].sideInput);
 	}
 }
 
@@ -803,29 +807,7 @@ void SpreadSignalToComponent(int rt, int ct, int rs, int cs)
 				|| (rt == rs+1 && state[rt][ct].direction == 2)
 				|| (ct == cs-1 && state[rt][ct].direction == 3))
 			{
-				newState[rt][ct].state = 1;
-				newState[rt][ct].redstoneSignal = state[rs][cs].redstoneSignal;
-				//默认激活且输出后面信号
-				if(state[rt][ct].mode == 'c')//如果侧边信号大于输入，不输出
-				{
-					if(state[rt][ct].sideInput > newState[rt][ct].redstoneSignal)
-					{
-						newState[rt][ct].state = 0;
-						newState[rt][ct].redstoneSignal = 0;
-					}
-				}
-				else if(state[rt][ct].mode == 'm')
-				{
-					if(state[rt][ct].sideInput >= newState[rt][ct].redstoneSignal)
-					{
-						newState[rt][ct].state = 0;
-						newState[rt][ct].redstoneSignal = 0;
-					}
-					else
-					{
-						newState[rt][ct].redstoneSignal -= state[rt][ct].sideInput;
-					}
-				}
+				newState[rt][ct].mainInput = state[rs][cs].redstoneSignal;
 			}
 			//只有红石线，红石中继器，红石比较器会产生红石比较器的侧边输入
 			if(world[rs][cs] == Redstone_Wire || world[rs][cs] == Redstone_Repeater || world[rs][cs] == Redstone_Comparator)
@@ -955,7 +937,7 @@ void SpreadEnergyToBlock(int r, int c, int energyLevel, int redstoneSignal)
 
 void UpdateWorld()//根据t-1状态计算t状态
 {
-	int r, c;
+	int r, c, i;
 	//创建新状态
 	newState =(BlockState**) calloc(height, sizeof(BlockState*));
 	for(r=0; r<height; r++)
@@ -1019,6 +1001,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 			if(world[r][c] == Redstone_Repeater && state[r][c].delay == 1) newState[r][c].redstoneTick = -1;
 			newState[r][c].energyLevel = 0;
 			if(world[r][c] == Redstone_Block) newState[r][c].energyLevel = 2;
+			newState[r][c].mainInput = 0;
 			newState[r][c].sideInput = 0;
 			newState[r][c].isLocked = 0;
 			newState[r][c].weakChargingSignal = 0;
@@ -1031,296 +1014,399 @@ void UpdateWorld()//根据t-1状态计算t状态
 		for(c=0; c<width; c++)
 		{
 			//根据旧状态计算新状态
-			if(world[r][c] == Redstone_Block
-				|| (world[r][c] == Lever && state[r][c].state == 1)
-				|| (world[r][c] == Button && state[r][c].state == 1))//电源作用
+			if(world[r][c] != Air && world[r][c] != Redstone_Wire)
 			{
-				SpreadEnergyToBlock(r, c, 2, 15);//强充能所在方块
-				//尝试激活附近红石线
-				newState[r][c].redstoneSignal = 16;
-				SpreadSignalOnWire(r, c);
-				newState[r][c].redstoneSignal = 15;
-				//尝试激活附近部件
-				if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
-				if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
-				if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
-				if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
-			}
-			else if(world[r][c] == Redstone_Wire && state[r][c].state == 1)//激活红石线作用
-			{
-				SpreadEnergyToBlock(r, c, 1, state[r][c].redstoneSignal);//弱充能所在方块
-				//尝试激活附近部件
-				if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
-				if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
-				if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
-				if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
-				//弱充能指向方块
-				if(state[r][c].onBlock == 0)
+				if(world[r][c] == Redstone_Block
+					|| (world[r][c] == Lever && state[r][c].state == 1)
+					|| (world[r][c] == Button && state[r][c].state == 1))//电源作用
 				{
-					if(state[r][c].direction & 8 && r > 0)
-					{
-						SpreadEnergyToBlock(r-1, c, 1, state[r][c].redstoneSignal);
-					}
-					if(state[r][c].direction & 4 && c+1 < width)
-					{
-						SpreadEnergyToBlock(r, c+1, 1, state[r][c].redstoneSignal);
-					}
-					if(state[r][c].direction & 2 && r+1 < height)
-					{
-						SpreadEnergyToBlock(r+1, c, 1, state[r][c].redstoneSignal);
-					}
-					if(state[r][c].direction & 1 && c > 0)
-					{
-						SpreadEnergyToBlock(r, c-1, 1, state[r][c].redstoneSignal);
-					}
+					SpreadEnergyToBlock(r, c, 2, 15);//强充能所在方块
+					//尝试激活附近红石线
+					newState[r][c].redstoneSignal = 16;
+					SpreadSignalOnWire(r, c);
+					newState[r][c].redstoneSignal = 15;
+					//尝试激活附近部件
+					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
+					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
+					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
+					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
 				}
-			}
-			else if(world[r][c] == Redstone_Torch && state[r][c].state == 0)
-			{
-				//尝试激活同层红石线
-				if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == state[r][c].onBlock)
+				/*else if(world[r][c] == Redstone_Wire && state[r][c].state == 1)//激活红石线作用
 				{
-					newState[r-1][c].state = 1;
-					newState[r-1][c].redstoneSignal = 15;
-					SpreadSignalOnWire(r-1, c);
-				}
-				if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == state[r][c].onBlock)
-				{
-					newState[r][c+1].state = 1;
-					newState[r][c+1].redstoneSignal = 15;
-					SpreadSignalOnWire(r, c+1);
-				}
-				if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == state[r][c].onBlock)
-				{
-					newState[r+1][c].state = 1;
-					newState[r+1][c].redstoneSignal = 15;
-					SpreadSignalOnWire(r+1, c);
-				}
-				if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == state[r][c].onBlock)
-				{
-					newState[r][c-1].state = 1;
-					newState[r][c-1].redstoneSignal = 15;
-					SpreadSignalOnWire(r, c-1);
-				}
-				//尝试激活附近部件
-				if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
-				if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
-				if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
-				if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
-			}
-			else if(world[r][c] == Redstone_Repeater && state[r][c].state == 1)
-			{
-				if(state[r][c].direction == 0)
-				{
-					if(r > 0)
+					SpreadEnergyToBlock(r, c, 1, state[r][c].redstoneSignal);//弱充能所在方块
+					//尝试激活附近部件
+					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
+					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
+					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
+					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
+					//弱充能指向方块
+					if(state[r][c].onBlock == 0)
 					{
-						SpreadEnergyToBlock(r-1, c, 2, 15);//强充能对应方块
-						if(world[r-1][c] == Redstone_Wire)//点亮的中继器1延迟点亮红石线
+						if(state[r][c].direction & 8 && r > 0)
 						{
-							newState[r-1][c].state = 1;
-							newState[r-1][c].redstoneSignal = 15;
-							SpreadSignalOnWire(r-1, c);
+							SpreadEnergyToBlock(r-1, c, 1, state[r][c].redstoneSignal);
 						}
-						else
+						if(state[r][c].direction & 4 && c+1 < width)
 						{
-							SpreadSignalToComponent(r-1, c, r, c);
+							SpreadEnergyToBlock(r, c+1, 1, state[r][c].redstoneSignal);
+						}
+						if(state[r][c].direction & 2 && r+1 < height)
+						{
+							SpreadEnergyToBlock(r+1, c, 1, state[r][c].redstoneSignal);
+						}
+						if(state[r][c].direction & 1 && c > 0)
+						{
+							SpreadEnergyToBlock(r, c-1, 1, state[r][c].redstoneSignal);
 						}
 					}
-				}
-				else if(state[r][c].direction == 1)
+				}*/
+				else if(world[r][c] == Redstone_Torch && state[r][c].state == 0)
 				{
-					if(c+1 < width)
+					//尝试激活同层红石线
+					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == state[r][c].onBlock)
 					{
-						SpreadEnergyToBlock(r, c+1, 2, 15);
-						if(world[r][c+1] == Redstone_Wire)
-						{
-							newState[r][c+1].state = 1;
-							newState[r][c+1].redstoneSignal = 15;
-							SpreadSignalOnWire(r, c+1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c+1, r, c);
-						}
+						newState[r-1][c].state = 1;
+						newState[r-1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r-1, c);
 					}
-				}
-				else if(state[r][c].direction == 2)
-				{
-					if(r+1 < height)
+					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == state[r][c].onBlock)
 					{
-						SpreadEnergyToBlock(r+1, c, 2, 15);
-						if(world[r+1][c] == Redstone_Wire)
-						{
-							newState[r+1][c].state = 1;
-							newState[r+1][c].redstoneSignal = 15;
-							SpreadSignalOnWire(r+1, c);
-						}
-						else
-						{
-							SpreadSignalToComponent(r+1, c, r, c);
-						}
+						newState[r][c+1].state = 1;
+						newState[r][c+1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c+1);
 					}
-				}
-				else if(state[r][c].direction == 3)
-				{
-					if(c > 0)
+					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == state[r][c].onBlock)
 					{
-						SpreadEnergyToBlock(r, c-1, 2, 15);
-						if(world[r][c-1] == Redstone_Wire)
-						{
-							newState[r][c-1].state = 1;
-							newState[r][c-1].redstoneSignal = 15;
-							SpreadSignalOnWire(r, c-1);
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c-1, r, c);
-						}
+						newState[r+1][c].state = 1;
+						newState[r+1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r+1, c);
 					}
-				}
-			}
-			else if(world[r][c] == Redstone_Comparator && state[r][c].state == 1)
-			{
-				if(state[r][c].direction == 0)
-				{
-					if(r > 0)
+					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == state[r][c].onBlock)
 					{
-						SpreadEnergyToBlock(r-1, c, 2, state[r][c].redstoneSignal);
-						if(world[r-1][c] == Redstone_Wire)
+						newState[r][c-1].state = 1;
+						newState[r][c-1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c-1);
+					}
+					//尝试激活附近部件
+					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
+					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
+					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
+					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
+				}
+				else if(world[r][c] == Redstone_Repeater && state[r][c].state == 1)
+				{
+					if(state[r][c].direction == 0)
+					{
+						if(r > 0)
 						{
-							newState[r-1][c].state = 1;
-							if(newState[r-1][c].redstoneSignal < state[r][c].redstoneSignal)
+							SpreadEnergyToBlock(r-1, c, 2, 15);//强充能对应方块
+							if(world[r-1][c] == Redstone_Wire)//点亮的中继器1延迟点亮红石线
 							{
-								newState[r-1][c].redstoneSignal = state[r][c].redstoneSignal;
+								newState[r-1][c].state = 1;
+								newState[r-1][c].redstoneSignal = 15;
 								SpreadSignalOnWire(r-1, c);
 							}
-						}
-						else
-						{
-							SpreadSignalToComponent(r-1, c, r, c);
+							else
+							{
+								SpreadSignalToComponent(r-1, c, r, c);
+							}
 						}
 					}
-				}
-				else if(state[r][c].direction == 1)
-				{
-					if(c+1 < width)
+					else if(state[r][c].direction == 1)
 					{
-						SpreadEnergyToBlock(r, c+1, 2, state[r][c].redstoneSignal);
-						if(world[r][c+1] == Redstone_Wire)
+						if(c+1 < width)
 						{
-							newState[r][c+1].state = 1;
-							if(newState[r][c+1].redstoneSignal < state[r][c].redstoneSignal)
+							SpreadEnergyToBlock(r, c+1, 2, 15);
+							if(world[r][c+1] == Redstone_Wire)
 							{
-								newState[r][c+1].redstoneSignal = state[r][c].redstoneSignal;
+								newState[r][c+1].state = 1;
+								newState[r][c+1].redstoneSignal = 15;
 								SpreadSignalOnWire(r, c+1);
 							}
-						}
-						else
-						{
-							SpreadSignalToComponent(r, c+1, r, c);
+							else
+							{
+								SpreadSignalToComponent(r, c+1, r, c);
+							}
 						}
 					}
-				}
-				else if(state[r][c].direction == 2)
-				{
-					if(r+1 < height)
+					else if(state[r][c].direction == 2)
 					{
-						SpreadEnergyToBlock(r+1, c, 2, state[r][c].redstoneSignal);
-						if(world[r+1][c] == Redstone_Wire)
+						if(r+1 < height)
 						{
-							newState[r+1][c].state = 1;
-							if(newState[r+1][c].redstoneSignal < state[r][c].redstoneSignal)
+							SpreadEnergyToBlock(r+1, c, 2, 15);
+							if(world[r+1][c] == Redstone_Wire)
 							{
-								newState[r+1][c].redstoneSignal = state[r][c].redstoneSignal;
+								newState[r+1][c].state = 1;
+								newState[r+1][c].redstoneSignal = 15;
 								SpreadSignalOnWire(r+1, c);
 							}
+							else
+							{
+								SpreadSignalToComponent(r+1, c, r, c);
+							}
 						}
-						else
+					}
+					else if(state[r][c].direction == 3)
+					{
+						if(c > 0)
 						{
-							SpreadSignalToComponent(r+1, c, r, c);
+							SpreadEnergyToBlock(r, c-1, 2, 15);
+							if(world[r][c-1] == Redstone_Wire)
+							{
+								newState[r][c-1].state = 1;
+								newState[r][c-1].redstoneSignal = 15;
+								SpreadSignalOnWire(r, c-1);
+							}
+							else
+							{
+								SpreadSignalToComponent(r, c-1, r, c);
+							}
 						}
 					}
 				}
-				else if(state[r][c].direction == 3)
+				else if(world[r][c] == Redstone_Comparator && state[r][c].state == 1)
 				{
-					if(c > 0)
+					if(state[r][c].direction == 0)
 					{
-						SpreadEnergyToBlock(r, c-1, 2, state[r][c].redstoneSignal);
-						if(world[r][c-1] == Redstone_Wire)
+						if(r > 0)
 						{
-							newState[r][c-1].state = 1;
-							if(newState[r][c-1].redstoneSignal < state[r][c].redstoneSignal)
+							SpreadEnergyToBlock(r-1, c, 2, state[r][c].redstoneSignal);
+							if(world[r-1][c] == Redstone_Wire)
 							{
-								newState[r][c-1].redstoneSignal = state[r][c].redstoneSignal;
-								SpreadSignalOnWire(r, c-1);
+								newState[r-1][c].state = 1;
+								if(newState[r-1][c].redstoneSignal < state[r][c].redstoneSignal)
+								{
+									newState[r-1][c].redstoneSignal = state[r][c].redstoneSignal;
+									SpreadSignalOnWire(r-1, c);
+								}
+							}
+							else
+							{
+								SpreadSignalToComponent(r-1, c, r, c);
 							}
 						}
-						else
+					}
+					else if(state[r][c].direction == 1)
+					{
+						if(c+1 < width)
 						{
-							SpreadSignalToComponent(r, c-1, r, c);
+							SpreadEnergyToBlock(r, c+1, 2, state[r][c].redstoneSignal);
+							if(world[r][c+1] == Redstone_Wire)
+							{
+								newState[r][c+1].state = 1;
+								if(newState[r][c+1].redstoneSignal < state[r][c].redstoneSignal)
+								{
+									newState[r][c+1].redstoneSignal = state[r][c].redstoneSignal;
+									SpreadSignalOnWire(r, c+1);
+								}
+							}
+							else
+							{
+								SpreadSignalToComponent(r, c+1, r, c);
+							}
+						}
+					}
+					else if(state[r][c].direction == 2)
+					{
+						if(r+1 < height)
+						{
+							SpreadEnergyToBlock(r+1, c, 2, state[r][c].redstoneSignal);
+							if(world[r+1][c] == Redstone_Wire)
+							{
+								newState[r+1][c].state = 1;
+								if(newState[r+1][c].redstoneSignal < state[r][c].redstoneSignal)
+								{
+									newState[r+1][c].redstoneSignal = state[r][c].redstoneSignal;
+									SpreadSignalOnWire(r+1, c);
+								}
+							}
+							else
+							{
+								SpreadSignalToComponent(r+1, c, r, c);
+							}
+						}
+					}
+					else if(state[r][c].direction == 3)
+					{
+						if(c > 0)
+						{
+							SpreadEnergyToBlock(r, c-1, 2, state[r][c].redstoneSignal);
+							if(world[r][c-1] == Redstone_Wire)
+							{
+								newState[r][c-1].state = 1;
+								if(newState[r][c-1].redstoneSignal < state[r][c].redstoneSignal)
+								{
+									newState[r][c-1].redstoneSignal = state[r][c].redstoneSignal;
+									SpreadSignalOnWire(r, c-1);
+								}
+							}
+							else
+							{
+								SpreadSignalToComponent(r, c-1, r, c);
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-	//充能方块作用
+	for(i=0; i<2; i++)
+	{
+		//红石线加速作用/强充能方块激活的红石线作用
+		for(r=0; r<height; r++)
+		{
+			for(c=0; c<width; c++)
+			{
+				if(world[r][c] == Redstone_Wire)
+				{
+					state[r][c] = newState[r][c];
+				}
+			}
+		}
+		for(r=0; r<height; r++)
+		{
+			for(c=0; c<width; c++)
+			{
+				if(world[r][c] == Redstone_Wire && state[r][c].state == 1)//激活红石线作用
+				{
+					SpreadEnergyToBlock(r, c, 1, state[r][c].redstoneSignal);//弱充能所在方块
+					//尝试激活附近部件
+					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
+					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
+					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
+					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
+					//弱充能指向方块
+					if(state[r][c].onBlock == 0)
+					{
+						if(state[r][c].direction & 8 && r > 0)
+						{
+							SpreadEnergyToBlock(r-1, c, 1, state[r][c].redstoneSignal);
+						}
+						if(state[r][c].direction & 4 && c+1 < width)
+						{
+							SpreadEnergyToBlock(r, c+1, 1, state[r][c].redstoneSignal);
+						}
+						if(state[r][c].direction & 2 && r+1 < height)
+						{
+							SpreadEnergyToBlock(r+1, c, 1, state[r][c].redstoneSignal);
+						}
+						if(state[r][c].direction & 1 && c > 0)
+						{
+							SpreadEnergyToBlock(r, c-1, 1, state[r][c].redstoneSignal);
+						}
+					}
+				}
+			}
+		}
+		//充能方块加速作用/强充能方块激活红石线弱充能的方块作用
+		for(r=0; r<height; r++)
+		{
+			for(c=0; c<width; c++)
+			{
+				if(state[r][c].onBlock)
+				{
+					state[r][c].energyLevel = newState[r][c].energyLevel;
+					state[r][c].weakChargingSignal = newState[r][c].weakChargingSignal;
+					state[r][c].strongChargingSignal = newState[r][c].strongChargingSignal;
+				}
+			}
+		}
+		for(r=0; r<height; r++)
+		{
+			for(c=0; c<width; c++)
+			{
+				if(state[r][c].onBlock && state[r][c].energyLevel > 0)//充能方块作用
+				{
+					if(world[r][c] == Redstone_Torch)
+					{
+						newState[r][c].state = 1;
+						newState[r][c].redstoneSignal = 0;
+					}
+					if(state[r][c].energyLevel & 2)
+					{
+						//尝试激活附近红石线
+						if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == 0)
+						{
+							newState[r-1][c].state = 1;
+							if(newState[r-1][c].redstoneSignal < state[r][c].strongChargingSignal)
+							{
+								newState[r-1][c].redstoneSignal = state[r][c].strongChargingSignal;
+								SpreadSignalOnWire(r-1, c);
+							}
+						}
+						if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == 0)
+						{
+							newState[r][c+1].state = 1;
+							if(newState[r][c+1].redstoneSignal < state[r][c].strongChargingSignal)
+							{
+								newState[r][c+1].redstoneSignal = state[r][c].strongChargingSignal;
+								SpreadSignalOnWire(r, c+1);
+							}
+						}
+						if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == 0)
+						{
+							newState[r+1][c].state = 1;
+							if(newState[r+1][c].redstoneSignal < state[r][c].strongChargingSignal)
+							{
+								newState[r+1][c].redstoneSignal = state[r][c].strongChargingSignal;
+								SpreadSignalOnWire(r+1, c);
+							}
+						}
+						if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == 0)
+						{
+							newState[r][c-1].state = 1;
+							if(newState[r][c-1].redstoneSignal < state[r][c].strongChargingSignal)
+							{
+								newState[r][c-1].redstoneSignal = state[r][c].strongChargingSignal;
+								SpreadSignalOnWire(r, c-1);
+							}
+						}
+					}
+					//尝试激活附近部件
+					if(r > 0) SpreadEnergyToComponent(r-1, c, r, c);
+					if(c+1 < width) SpreadEnergyToComponent(r, c+1, r, c);
+					if(r+1 < height) SpreadEnergyToComponent(r+1, c, r, c);
+					if(c > 0) SpreadEnergyToComponent(r, c-1, r, c);
+				}
+			}
+		}
+		//充能方块无论强弱必有能量载体，强充能为输入载体，弱充能为输出载体
+	}
+	//红石比较器加速响应
 	for(r=0; r<height; r++)
 	{
 		for(c=0; c<width; c++)
 		{
-			if(state[r][c].onBlock && state[r][c].energyLevel > 0)
+			if(world[r][c] == Redstone_Comparator)
 			{
-				if(world[r][c] == Redstone_Torch)
+				//默认激活且输出后面信号
+				if(state[r][c].mode == 'c')//如果侧边信号大于输入，不输出
 				{
-					newState[r][c].state = 1;
-					newState[r][c].redstoneSignal = 0;
-				}
-				if(state[r][c].energyLevel & 2)
-				{
-					//尝试激活附近红石线
-					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == 0)
+					if(newState[r][c].sideInput > newState[r][c].mainInput)
 					{
-						newState[r-1][c].state = 1;
-						if(newState[r-1][c].redstoneSignal < state[r][c].strongChargingSignal)
-						{
-							newState[r-1][c].redstoneSignal = state[r][c].strongChargingSignal;
-							SpreadSignalOnWire(r-1, c);
-						}
+						newState[r][c].state = 0;
+						newState[r][c].redstoneSignal = 0;
 					}
-					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == 0)
+					else
 					{
-						newState[r][c+1].state = 1;
-						if(newState[r][c+1].redstoneSignal < state[r][c].strongChargingSignal)
-						{
-							newState[r][c+1].redstoneSignal = state[r][c].strongChargingSignal;
-							SpreadSignalOnWire(r, c+1);
-						}
-					}
-					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == 0)
-					{
-						newState[r+1][c].state = 1;
-						if(newState[r+1][c].redstoneSignal < state[r][c].strongChargingSignal)
-						{
-							newState[r+1][c].redstoneSignal = state[r][c].strongChargingSignal;
-							SpreadSignalOnWire(r+1, c);
-						}
-					}
-					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == 0)
-					{
-						newState[r][c-1].state = 1;
-						if(newState[r][c-1].redstoneSignal < state[r][c].strongChargingSignal)
-						{
-							newState[r][c-1].redstoneSignal = state[r][c].strongChargingSignal;
-							SpreadSignalOnWire(r, c-1);
-						}
+						newState[r][c].state = 1;
+						newState[r][c].redstoneSignal = newState[r][c].mainInput;
+						if(newState[r][c].redstoneSignal == 0) newState[r][c].state = 0;
 					}
 				}
-				//尝试激活附近部件
-				if(r > 0) SpreadEnergyToComponent(r-1, c, r, c);
-				if(c+1 < width) SpreadEnergyToComponent(r, c+1, r, c);
-				if(r+1 < height) SpreadEnergyToComponent(r+1, c, r, c);
-				if(c > 0) SpreadEnergyToComponent(r, c-1, r, c);
+				else if(state[r][c].mode == 'm')
+				{
+					if(newState[r][c].sideInput >= newState[r][c].mainInput)
+					{
+						newState[r][c].state = 0;
+						newState[r][c].redstoneSignal = 0;
+					}
+					else
+					{
+						newState[r][c].state = 1;
+						newState[r][c].redstoneSignal = newState[r][c].mainInput - newState[r][c].sideInput;
+					}
+				}
 			}
 		}
 	}
@@ -1558,5 +1644,8 @@ Minecraft Redstone Simulator 0.9
 ——修复 红石比较器可能在强信号红石线中产生单格弱信号
 ——修复 新调的2刻及以上红石中继器不会改变状态
 ——修复 打开世界时红石中继器总是处于亮起状态
-//——优化 调整红石延时逻辑
+Minecraft Redstone Simulator 0.10
+——优化 红石线不再有延迟
+——优化 充能方块不再有延迟
+——优化 降低红石比较器的延迟
 --------------------------------*/
