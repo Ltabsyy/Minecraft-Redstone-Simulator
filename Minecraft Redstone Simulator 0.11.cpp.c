@@ -610,7 +610,11 @@ void DrawWorld(int mainhand)//绘制世界
 		xyprintf(0, height*blockSideLength, "RedstoneTick:%d", currentTick);
 		xyprintf(0, height*blockSideLength+blockSideLength*3/8, "Position:%d,%d", r, c);
 		//if(state[r][c].onBlock) xyprintf(0, height*blockSideLength+blockSideLength*6/8, "EnergyLevel:%d", state[r][c].energyLevel);
-		//if(world[r][c] == Redstone_Comparator) xyprintf(0, height*blockSideLength+blockSideLength*6/8, "AB:%d,%d", state[r][c].redstoneSignal, state[r][c].sideInput);
+		/*if(world[r][c] == Redstone_Comparator)
+		{
+			xyprintf(0, height*blockSideLength+blockSideLength*6/8, "ABC:%d(%d)->%d",
+				state[r][c].mainInput, state[r][c].sideInput, state[r][c].redstoneSignal);
+		}*/
 	}
 }
 
@@ -810,20 +814,23 @@ void SpreadSignalToComponent(int rt, int ct, int rs, int cs)
 				newState[rt][ct].mainInput = state[rs][cs].redstoneSignal;
 			}
 			//只有红石线，红石中继器，红石比较器会产生红石比较器的侧边输入
-			if(world[rs][cs] == Redstone_Wire || world[rs][cs] == Redstone_Repeater || world[rs][cs] == Redstone_Comparator)
+			if(state[rs][cs].redstoneSignal > newState[rt][ct].sideInput)
 			{
-				if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
+				if(world[rs][cs] == Redstone_Wire || world[rs][cs] == Redstone_Repeater || world[rs][cs] == Redstone_Comparator)
 				{
-					if(rt == rs && (ct == cs-1 || ct == cs+1))
+					if(state[rt][ct].direction == 0 || state[rt][ct].direction == 2)
 					{
-						newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+						if(rt == rs && (ct == cs-1 || ct == cs+1))
+						{
+							newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+						}
 					}
-				}
-				else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
-				{
-					if((rt == rs-1 || rt == rs+1) && ct == cs)
+					else if(state[rt][ct].direction == 1 || state[rt][ct].direction == 3)
 					{
-						newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+						if((rt == rs-1 || rt == rs+1) && ct == cs)
+						{
+							newState[rt][ct].sideInput = state[rs][cs].redstoneSignal;
+						}
 					}
 				}
 			}
@@ -869,42 +876,21 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 				|| (rt == rs+1 && state[rt][ct].direction == 2)
 				|| (ct == cs-1 && state[rt][ct].direction == 3))
 			{
-				newState[rt][ct].state = 1;
+				//newState[rt][ct].state = 1;
 				//获取输入信号
 				if(state[rs][cs].onBlock == 0)
 				{
-					newState[rt][ct].redstoneSignal = state[rs][cs].redstoneSignal;
+					newState[rt][ct].mainInput = state[rs][cs].redstoneSignal;
 				}
 				else//输入为充能方块时
 				{
 					if(state[rs][cs].weakChargingSignal < state[rs][cs].strongChargingSignal)
 					{
-						newState[rt][ct].redstoneSignal = state[rs][cs].strongChargingSignal;
+						newState[rt][ct].mainInput = state[rs][cs].strongChargingSignal;
 					}
 					else
 					{
-						newState[rt][ct].redstoneSignal = state[rs][cs].weakChargingSignal;
-					}
-				}
-				//默认激活且输出后面信号
-				if(state[rt][ct].mode == 'c')//如果侧边信号大于输入，不输出
-				{
-					if(state[rt][ct].sideInput > newState[rt][ct].redstoneSignal)
-					{
-						newState[rt][ct].state = 0;
-						newState[rt][ct].redstoneSignal = 0;
-					}
-				}
-				else if(state[rt][ct].mode == 'm')
-				{
-					if(state[rt][ct].sideInput >= newState[rt][ct].redstoneSignal)
-					{
-						newState[rt][ct].state = 0;
-						newState[rt][ct].redstoneSignal = 0;
-					}
-					else
-					{
-						newState[rt][ct].redstoneSignal -= state[rt][ct].sideInput;
+						newState[rt][ct].mainInput = state[rs][cs].weakChargingSignal;
 					}
 				}
 			}
@@ -1021,45 +1007,37 @@ void UpdateWorld()//根据t-1状态计算t状态
 					|| (world[r][c] == Button && state[r][c].state == 1))//电源作用
 				{
 					SpreadEnergyToBlock(r, c, 2, 15);//强充能所在方块
-					//尝试激活附近红石线
-					newState[r][c].redstoneSignal = 16;
-					SpreadSignalOnWire(r, c);
-					newState[r][c].redstoneSignal = 15;
+					//尝试激活同层红石线
+					if(r > 0 && world[r-1][c] == Redstone_Wire && state[r-1][c].onBlock == state[r][c].onBlock)
+					{
+						newState[r-1][c].state = 1;
+						newState[r-1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r-1, c);
+					}
+					if(c+1 < width && world[r][c+1] == Redstone_Wire && state[r][c+1].onBlock == state[r][c].onBlock)
+					{
+						newState[r][c+1].state = 1;
+						newState[r][c+1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c+1);
+					}
+					if(r+1 < height && world[r+1][c] == Redstone_Wire && state[r+1][c].onBlock == state[r][c].onBlock)
+					{
+						newState[r+1][c].state = 1;
+						newState[r+1][c].redstoneSignal = 15;
+						SpreadSignalOnWire(r+1, c);
+					}
+					if(c > 0 && world[r][c-1] == Redstone_Wire && state[r][c-1].onBlock == state[r][c].onBlock)
+					{
+						newState[r][c-1].state = 1;
+						newState[r][c-1].redstoneSignal = 15;
+						SpreadSignalOnWire(r, c-1);
+					}
 					//尝试激活附近部件
 					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
 					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
 					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
 					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
 				}
-				/*else if(world[r][c] == Redstone_Wire && state[r][c].state == 1)//激活红石线作用
-				{
-					SpreadEnergyToBlock(r, c, 1, state[r][c].redstoneSignal);//弱充能所在方块
-					//尝试激活附近部件
-					if(r > 0) SpreadSignalToComponent(r-1, c, r, c);
-					if(c+1 < width) SpreadSignalToComponent(r, c+1, r, c);
-					if(r+1 < height) SpreadSignalToComponent(r+1, c, r, c);
-					if(c > 0) SpreadSignalToComponent(r, c-1, r, c);
-					//弱充能指向方块
-					if(state[r][c].onBlock == 0)
-					{
-						if(state[r][c].direction & 8 && r > 0)
-						{
-							SpreadEnergyToBlock(r-1, c, 1, state[r][c].redstoneSignal);
-						}
-						if(state[r][c].direction & 4 && c+1 < width)
-						{
-							SpreadEnergyToBlock(r, c+1, 1, state[r][c].redstoneSignal);
-						}
-						if(state[r][c].direction & 2 && r+1 < height)
-						{
-							SpreadEnergyToBlock(r+1, c, 1, state[r][c].redstoneSignal);
-						}
-						if(state[r][c].direction & 1 && c > 0)
-						{
-							SpreadEnergyToBlock(r, c-1, 1, state[r][c].redstoneSignal);
-						}
-					}
-				}*/
 				else if(world[r][c] == Redstone_Torch && state[r][c].state == 0)
 				{
 					//尝试激活同层红石线
@@ -1449,10 +1427,12 @@ void UpdateWorld()//根据t-1状态计算t状态
 			else if(world[r][c] == Lever && state[r][c].state == 1)
 			{
 				newState[r][c].state = 1;
+				newState[r][c].redstoneSignal = 15;
 			}
 			else if(world[r][c] == Button && state[r][c].state == 1 && state[r][c].redstoneTick >= currentTick)
 			{
 				newState[r][c].state = 1;
+				newState[r][c].redstoneSignal = 15;
 			}
 		}
 	}
@@ -1648,4 +1628,8 @@ Minecraft Redstone Simulator 0.10
 ——优化 红石线不再有延迟
 ——优化 充能方块不再有延迟
 ——优化 降低红石比较器的延迟
+Minecraft Redstone Simulator 0.11
+——修复 红石线可以减小红石比较器的侧边输入
+——修复 红石块、不在方块上的拉杆、按钮可以激活方块上的红石线
+——修复 充能方块不能激活红石比较器
 --------------------------------*/
