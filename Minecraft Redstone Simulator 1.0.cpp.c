@@ -29,10 +29,10 @@ typedef struct _BlockState
 	int state;//状态
 	int redstoneSignal;//红石信号强度(0-15)
 	int redstoneTick;//元件改变状态的红石刻(0.1s)
-	int energyLevel;//方块充能等级(1弱充能2强充能3强弱混合充能)
+	int isLocked;//红石中继器是否被锁定
 	int mainInput;//红石比较器后面输入的红石信号强度
 	int sideInput;//红石比较器侧面输入的红石信号强度
-	int isLocked;//红石中继器是否被锁定
+	int energyLevel;//方块充能等级(1弱充能2强充能3强弱混合充能)
 	int weakChargingSignal;//方块被弱充能的红石信号强度
 	int strongChargingSignal;//方块被强充能的红石信号强度
 }BlockState;
@@ -125,15 +125,15 @@ void InitInventory()//设置所有元件默认状态
 		inventoryState[i].state = 0;
 		inventoryState[i].redstoneSignal = 0;
 		inventoryState[i].redstoneTick = -1;
-		inventoryState[i].energyLevel = 0;
+		inventoryState[i].isLocked = 0;
 		inventoryState[i].mainInput = 0;
 		inventoryState[i].sideInput = 0;
-		inventoryState[i].isLocked = 0;
+		inventoryState[i].energyLevel = 0;
 		inventoryState[i].weakChargingSignal = 0;
 		inventoryState[i].strongChargingSignal = 0;
 		if(i == Air)
 		{
-			inventoryState[i].onBlock = 1;
+			inventoryState[i].onBlock = 1;//物品栏首格为方块
 		}
 		else if(i == Redstone_Wire)
 		{
@@ -492,8 +492,6 @@ void DrawBlockID(int x, int y, int id, BlockState s)//绘制元件
 			if(s.state == 0) setcolor(Color[Color_RedstoneSignal_0]);
 			else setcolor(Color[Color_RedstoneSignal_15]);
 			xyprintf(x+blockSideLength*6/16, y+blockSideLength*3/16, "%c", s.mode);
-			//xyprintf(x, y+blockSideLength*9/16, "%d", s.sideInput);
-			//xyprintf(x+blockSideLength*11/16, y+blockSideLength*9/16, "%d", s.redstoneSignal);
 		}
 	}
 	else if(id == Lever)
@@ -876,7 +874,6 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 				|| (rt == rs+1 && state[rt][ct].direction == 2)
 				|| (ct == cs-1 && state[rt][ct].direction == 3))
 			{
-				//newState[rt][ct].state = 1;
 				//获取输入信号
 				if(state[rs][cs].onBlock == 0)
 				{
@@ -884,7 +881,7 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 				}
 				else//输入为充能方块时
 				{
-					if(state[rs][cs].weakChargingSignal < state[rs][cs].strongChargingSignal)
+					if(state[rs][cs].weakChargingSignal < state[rs][cs].strongChargingSignal)//在强弱充能信号中选择较大值
 					{
 						newState[rt][ct].mainInput = state[rs][cs].strongChargingSignal;
 					}
@@ -985,11 +982,11 @@ void UpdateWorld()//根据t-1状态计算t状态
 			newState[r][c].redstoneSignal = 0;
 			if(world[r][c] == Redstone_Torch || world[r][c] == Redstone_Block) newState[r][c].redstoneSignal = 15;
 			if(world[r][c] == Redstone_Repeater && state[r][c].delay == 1) newState[r][c].redstoneTick = -1;
-			newState[r][c].energyLevel = 0;
-			if(world[r][c] == Redstone_Block) newState[r][c].energyLevel = 2;
+			newState[r][c].isLocked = 0;
 			newState[r][c].mainInput = 0;
 			newState[r][c].sideInput = 0;
-			newState[r][c].isLocked = 0;
+			newState[r][c].energyLevel = 0;
+			if(world[r][c] == Redstone_Block) newState[r][c].energyLevel = 2;
 			newState[r][c].weakChargingSignal = 0;
 			newState[r][c].strongChargingSignal = 0;
 		}
@@ -1395,11 +1392,7 @@ void UpdateWorld()//根据t-1状态计算t状态
 		{
 			if(world[r][c] == Redstone_Repeater)
 			{
-				if(state[r][c].state == newState[r][c].state)//新旧状态相同
-				{
-					//newState[r][c].redstoneTick = currentTick + state[r][c].delay;//推迟改变刻
-				}
-				else//新旧状态不同
+				if(state[r][c].state != newState[r][c].state)//新旧状态不同
 				{
 					if(state[r][c].delay > 1) newState[r][c].state = state[r][c].state;
 					if(state[r][c].redstoneTick == -1)
@@ -1414,11 +1407,6 @@ void UpdateWorld()//根据t-1状态计算t状态
 					if(newState[r][c].state == 1) newState[r][c].redstoneSignal = 15;
 					else newState[r][c].redstoneSignal = 0;
 				}
-				/*else if(state[r][c].redstoneTick < currentTick-10 && state[r][c].redstoneTick != -1)
-				{
-					newState[r][c].state = 0;
-					newState[r][c].redstoneTick = -1;
-				}*/
 				if(state[r][c].isLocked == 1)
 				{
 					newState[r][c].state = state[r][c].state;
@@ -1530,8 +1518,8 @@ int main(int argc, char* argv[])
 					{
 						RotateInventory(mainhand);
 					}
+					//点击切物品栏(不做)
 				}
-				//点击切物品栏(不做)
 			}
 		}
 		while(kbmsg())
@@ -1632,4 +1620,10 @@ Minecraft Redstone Simulator 0.11
 ——修复 红石线可以减小红石比较器的侧边输入
 ——修复 红石块、不在方块上的拉杆、按钮可以激活方块上的红石线
 ——修复 充能方块不能激活红石比较器
+Minecraft Redstone Simulator 1.0
+——优化 简化部分代码
+//——新增 红石块和红石灯视为方块
+//——优化 红石线不再主动连接红石灯
+//——优化 延长红石灯熄灭延迟至2刻
+//——优化 降低红石中继器锁定和解除锁定延迟
 --------------------------------*/
