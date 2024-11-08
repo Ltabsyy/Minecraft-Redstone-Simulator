@@ -18,7 +18,16 @@ enum BlockID
 };
 int numberOfBlockType = 9;
 
-typedef struct _BlockState
+typedef struct _World//方块属性
+{
+	BlockID id;
+	int direction;//方向
+	int onBlock;//空气、红石线、红石火把、拉杆、按钮是否位于方块上
+	int delay;//红石中继器的延时红石刻(1-4)
+	char mode;//红石比较器的模式(c比较m减法)
+}World;
+
+typedef struct _BlockState//红石状态
 {
 	//方块属性
 	int direction;//方向
@@ -111,6 +120,154 @@ int currentTick = 0;
 //int cameraC = 0;
 int showInformation = 0;
 //int showStep = 0;
+
+void InitInventory();
+void RotateInventory(int id);
+void ResizeWorld(int h, int w);
+int ReadWorld(const char* fileName);
+void WriteWorld();
+
+void ResizeWindow(int length);
+void DrawTorch(int x0, int y0, int state);
+void DrawBlockID(int x, int y, int id, BlockState s);
+void DrawBlock(int r, int c);
+void DrawWorld(int mainhand);
+
+void PutBlock(BlockID id, int r, int c);
+void BreakBlock(int r, int c);
+
+int IsConnected(int rt, int ct, int rs, int cs);
+void SpreadSignalOnWire(int r, int c);
+void SpreadSignalToComponent(int rt, int ct, int rs, int cs);
+void SpreadEnergyToComponent(int rt, int ct, int rs, int cs);
+void SpreadEnergyToBlock(int r, int c, int energyLevel, int redstoneSignal);
+void UpdateWire();
+void UpdateWorld();
+
+int main(int argc, char* argv[])
+{
+	int r, c;
+	int mainhand = 0;
+	mouse_msg mouseMsg;
+	key_msg keyMsg;
+	InitInventory();
+	if(argc == 2) ReadWorld(argv[1]);
+	else if(ReadWorld("mcrs-world.txt") == 0) ResizeWorld(18, 32);
+	UpdateWire();
+	ResizeWindow(32);
+	setbkcolor(Color[Color_BackGround]);
+	while(is_run())
+	{
+		//更新世界
+		UpdateWorld();
+		//绘制世界
+		DrawWorld(mainhand);
+		//检测输入
+		while(mousemsg())
+		{
+			mouseMsg = getmouse();
+			if(mouseMsg.is_wheel())
+			{
+				if(keystate(key_control))
+				{
+					if(mouseMsg.wheel > 0) ResizeWindow(blockSideLength+4);
+					else if(blockSideLength > 4) ResizeWindow(blockSideLength-4);
+				}
+				else//滚轮切物品栏
+				{
+					if(mouseMsg.wheel < 0) mainhand = (mainhand+1)%numberOfBlockType;
+					else
+					{
+						mainhand--;
+						if(mainhand < 0) mainhand = numberOfBlockType-1;
+					}
+				}
+			}
+			if(mouseMsg.is_up())
+			{
+				r = mouseMsg.y/blockSideLength;
+				c = mouseMsg.x/blockSideLength;
+				if(r >= 0 && r < height && c >= 0 && c < width)
+				{
+					if(mouseMsg.is_right())
+					{
+						if(world[r][c] == Air)
+						{
+							PutBlock((BlockID)mainhand, r, c);
+							UpdateWire();
+						}
+						else if(world[r][c] == Redstone_Repeater)
+						{
+							state[r][c].delay++;
+							if(state[r][c].delay > 4) state[r][c].delay = 1;
+						}
+						else if(world[r][c] == Redstone_Comparator)
+						{
+							if(state[r][c].mode == 'c') state[r][c].mode = 'm';
+							else state[r][c].mode = 'c';
+						}
+						else if(world[r][c] == Lever)
+						{
+							state[r][c].state = !(state[r][c].state);
+							if(state[r][c].state == 0) state[r][c].redstoneSignal = 0;
+							else state[r][c].redstoneSignal = 15;
+						}
+						else if(world[r][c] == Button)
+						{
+							state[r][c].state = 1;
+							if(state[r][c].state == 0) state[r][c].redstoneSignal = 0;
+							else state[r][c].redstoneSignal = 15;
+							state[r][c].redstoneTick = currentTick+15;//延时
+						}
+					}
+					else if(mouseMsg.is_left())
+					{
+						BreakBlock(r, c);
+						UpdateWire();
+					}
+				}
+				else
+				{
+					if(mouseMsg.is_right())
+					{
+						RotateInventory(mainhand);
+					}
+					//点击切物品栏(不做)
+				}
+			}
+		}
+		while(kbmsg())
+		{
+			keyMsg = getkey();
+			if(keyMsg.msg == key_msg_char)
+			{
+				if(keyMsg.key >= '0' && keyMsg.key <= '9')
+				{
+					mainhand = keyMsg.key-'0'+0;
+				}
+				else if(numberOfBlockType > 10 && keyMsg.key >= 'A' && keyMsg.key <= 'Z')
+				{
+					mainhand = keyMsg.key-'A'+10;
+				}
+				if(mainhand >= numberOfBlockType || mainhand < 0) mainhand = 0;
+			}
+			if(keystate(key_f3))
+			{
+				showInformation = !showInformation;
+			}
+			/*if(keystate(key_f5))
+			{
+				showStep = !showStep;
+			}*/
+		}
+		delay_ms(RedstoneTick);
+		currentTick++;
+		//if(showStep == 1) getch();
+	}
+	WriteWorld();
+	closegraph();
+	return 0;
+}
 
 void InitInventory()//设置所有元件默认状态
 {
@@ -874,21 +1031,13 @@ void SpreadEnergyToComponent(int rt, int ct, int rs, int cs)
 				|| (rt == rs+1 && state[rt][ct].direction == 2)
 				|| (ct == cs-1 && state[rt][ct].direction == 3))
 			{
-				//获取输入信号
-				if(state[rs][cs].onBlock == 0)
+				if(state[rs][cs].weakChargingSignal < state[rs][cs].strongChargingSignal)//在强弱充能信号中选择较大值
 				{
-					newState[rt][ct].mainInput = state[rs][cs].redstoneSignal;
+					newState[rt][ct].mainInput = state[rs][cs].strongChargingSignal;
 				}
-				else//输入为充能方块时
+				else
 				{
-					if(state[rs][cs].weakChargingSignal < state[rs][cs].strongChargingSignal)//在强弱充能信号中选择较大值
-					{
-						newState[rt][ct].mainInput = state[rs][cs].strongChargingSignal;
-					}
-					else
-					{
-						newState[rt][ct].mainInput = state[rs][cs].weakChargingSignal;
-					}
+					newState[rt][ct].mainInput = state[rs][cs].weakChargingSignal;
 				}
 			}
 			//充能方块不会产生红石比较器的侧边输入
@@ -918,16 +1067,9 @@ void SpreadEnergyToBlock(int r, int c, int energyLevel, int redstoneSignal)
 	}
 }
 
-void UpdateWorld()//根据t-1状态计算t状态
+void UpdateWire()//重置红石线连接状态
 {
-	int r, c, i;
-	//创建新状态
-	newState =(BlockState**) calloc(height, sizeof(BlockState*));
-	for(r=0; r<height; r++)
-	{
-		newState[r] =(BlockState*) calloc(width, sizeof(BlockState));
-	}
-	//重置红石线连接状态
+	int r, c;
 	for(r=0; r<height; r++)
 	{
 		for(c=0; c<width; c++)
@@ -971,6 +1113,17 @@ void UpdateWorld()//根据t-1状态计算t状态
 				else if(state[r][c].direction == 1) state[r][c].direction |= 4;
 			}
 		}
+	}
+}
+
+void UpdateWorld()//根据t-1状态计算t状态
+{
+	int r, c, i;
+	//创建新状态
+	newState =(BlockState**) calloc(height, sizeof(BlockState*));
+	for(r=0; r<height; r++)
+	{
+		newState[r] =(BlockState*) calloc(width, sizeof(BlockState));
 	}
 	//全部保存至新状态
 	for(r=0; r<height; r++)
@@ -1433,127 +1586,6 @@ void UpdateWorld()//根据t-1状态计算t状态
 	state = newState;
 }
 
-int main(int argc, char* argv[])
-{
-	int r, c;
-	int mainhand = 0;
-	mouse_msg mouseMsg;
-	key_msg keyMsg;
-	InitInventory();
-	if(argc == 2) ReadWorld(argv[1]);
-	else if(ReadWorld("mcrs-world.txt") == 0) ResizeWorld(18, 32);
-	ResizeWindow(32);
-	setbkcolor(Color[Color_BackGround]);
-	while(is_run())
-	{
-		//更新世界
-		UpdateWorld();
-		//绘制世界
-		DrawWorld(mainhand);
-		//检测输入
-		while(mousemsg())
-		{
-			mouseMsg = getmouse();
-			if(mouseMsg.is_wheel())
-			{
-				if(keystate(key_control))
-				{
-					if(mouseMsg.wheel > 0) ResizeWindow(blockSideLength+4);
-					else if(blockSideLength > 4) ResizeWindow(blockSideLength-4);
-				}
-				else//滚轮切物品栏
-				{
-					if(mouseMsg.wheel < 0) mainhand = (mainhand+1)%numberOfBlockType;
-					else
-					{
-						mainhand--;
-						if(mainhand < 0) mainhand = numberOfBlockType-1;
-					}
-				}
-			}
-			if(mouseMsg.is_up())
-			{
-				r = mouseMsg.y/blockSideLength;
-				c = mouseMsg.x/blockSideLength;
-				if(r >= 0 && r < height && c >= 0 && c < width)
-				{
-					if(mouseMsg.is_right())
-					{
-						if(world[r][c] == Air)
-						{
-							PutBlock((BlockID)mainhand, r, c);
-						}
-						else if(world[r][c] == Redstone_Repeater)
-						{
-							state[r][c].delay++;
-							if(state[r][c].delay > 4) state[r][c].delay = 1;
-						}
-						else if(world[r][c] == Redstone_Comparator)
-						{
-							if(state[r][c].mode == 'c') state[r][c].mode = 'm';
-							else state[r][c].mode = 'c';
-						}
-						else if(world[r][c] == Lever)
-						{
-							state[r][c].state = !(state[r][c].state);
-							if(state[r][c].state == 0) state[r][c].redstoneSignal = 0;
-							else state[r][c].redstoneSignal = 15;
-						}
-						else if(world[r][c] == Button)
-						{
-							state[r][c].state = 1;
-							if(state[r][c].state == 0) state[r][c].redstoneSignal = 0;
-							else state[r][c].redstoneSignal = 15;
-							state[r][c].redstoneTick = currentTick+15;//延时
-						}
-					}
-					else if(mouseMsg.is_left())
-					{
-						BreakBlock(r, c);
-					}
-				}
-				else
-				{
-					if(mouseMsg.is_right())
-					{
-						RotateInventory(mainhand);
-					}
-					//点击切物品栏(不做)
-				}
-			}
-		}
-		while(kbmsg())
-		{
-			keyMsg = getkey();
-			if(keyMsg.msg == key_msg_char)
-			{
-				if(keyMsg.key >= '0' && keyMsg.key <= '9')
-				{
-					mainhand = keyMsg.key-'0'+0;
-				}
-				else if(numberOfBlockType > 10 && keyMsg.key >= 'A' && keyMsg.key <= 'Z')
-				{
-					mainhand = keyMsg.key-'A'+10;
-				}
-				if(mainhand >= numberOfBlockType || mainhand < 0) mainhand = 0;
-			}
-			if(keystate(key_f3))
-			{
-				showInformation = !showInformation;
-			}
-			/*if(keystate(key_f5))
-			{
-				showStep = !showStep;
-			}*/
-		}
-		delay_ms(RedstoneTick);
-		currentTick++;
-		//if(showStep == 1) getch();
-	}
-	WriteWorld();
-	closegraph();
-	return 0;
-}
 /*--------------------------------
 更新日志：
 Minecraft Redstone Simulator 0.2
@@ -1622,8 +1654,12 @@ Minecraft Redstone Simulator 0.11
 ——修复 充能方块不能激活红石比较器
 Minecraft Redstone Simulator 1.0
 ——优化 简化部分代码
+Minecraft Redstone Simulator 1.1
+——优化 现在红石线连接状态仅在加载、放置、破坏时计算
 //——新增 红石块和红石灯视为方块
 //——优化 红石线不再主动连接红石灯
 //——优化 延长红石灯熄灭延迟至2刻
 //——优化 降低红石中继器锁定和解除锁定延迟
+//——优化 充能方块激活红石比较器代码
+//——优化 区分方块属性和红石状态
 --------------------------------*/
