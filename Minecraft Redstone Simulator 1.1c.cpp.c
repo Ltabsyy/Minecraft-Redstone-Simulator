@@ -367,7 +367,7 @@ int ReadWorld(const char* fileName)
 	FILE* file;
 	int r, c;
 	World worldTemp;
-	State stateTemp;
+	//State stateTemp;
 	if((file = fopen(fileName, "r")))
 	{
 		fscanf(file, "size:%d*%d\n", &r, &c);
@@ -1122,23 +1122,13 @@ void UpdateWorld()//根据t-1状态计算t状态
 	{
 		newState[r] =(State*) calloc(width, sizeof(State));
 	}
-	//全部保存至新状态
+	//新状态设置为对应元件默认状态
 	for(r=0; r<height; r++)
 	{
 		for(c=0; c<width; c++)
 		{
-			newState[r][c] = state[r][c];
-			newState[r][c].state = 0;//重置元件为默认状态
-			newState[r][c].redstoneSignal = 0;
-			if(world[r][c].id == Redstone_Torch || world[r][c].id == Redstone_Block) newState[r][c].redstoneSignal = 15;
-			if(world[r][c].id == Redstone_Repeater && world[r][c].delay == 1) newState[r][c].redstoneTick = -1;
-			newState[r][c].isLocked = 0;
-			newState[r][c].mainInput = 0;
-			newState[r][c].sideInput = 0;
-			newState[r][c].energyLevel = 0;
-			if(world[r][c].id == Redstone_Block) newState[r][c].energyLevel = 2;
-			newState[r][c].weakChargingSignal = 0;
-			newState[r][c].strongChargingSignal = 0;
+			newState[r][c] = defaultState[world[r][c].id];
+			//if(world[r][c].id == Redstone_Repeater && world[r][c].delay > 1) newState[r][c].redstoneTick = state[r][c].redstoneTick;
 		}
 	}
 	//计算元件
@@ -1567,10 +1557,11 @@ void UpdateWorld()//根据t-1状态计算t状态
 				newState[r][c].state = 1;
 				newState[r][c].redstoneSignal = 15;
 			}
-			else if(world[r][c].id == Button && state[r][c].state == 1 && state[r][c].redstoneTick >= currentTick)
+			else if(world[r][c].id == Button && state[r][c].state == 1 && state[r][c].redstoneTick > currentTick)
 			{
 				newState[r][c].state = 1;
 				newState[r][c].redstoneSignal = 15;
+				newState[r][c].redstoneTick = state[r][c].redstoneTick;
 			}
 		}
 	}
@@ -1655,8 +1646,10 @@ Minecraft Redstone Simulator 1.1
 ——优化 现在红石线连接状态仅在加载、放置、破坏时计算
 ——优化 充能方块激活红石比较器代码
 ——优化 区分方块属性和红石状态
+——修复 按钮延时略长
 //——新增 红石块和红石灯视为方块
 //——优化 红石线不再主动连接红石灯
 //——优化 延长红石灯熄灭延迟至2刻
 //——优化 降低红石中继器锁定和解除锁定延迟
+//——修复 2刻和4刻红石中继器延时略长
 --------------------------------*/
