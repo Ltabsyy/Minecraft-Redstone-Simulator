@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <graphics.h>//链接参数-mwindows
+#include "graphics.h"//链接参数-mwindows
 
 #define RedstoneTick 100
 
@@ -167,6 +167,7 @@ int main(int argc, char* argv[])
 				{
 					if(mouseMsg.wheel > 0) ResizeWindow(blockSideLength+4);
 					else if(blockSideLength > 4) ResizeWindow(blockSideLength-4);
+					DrawWorld(mainhand);//避免闪烁
 				}
 				else//滚轮切物品栏
 				{
@@ -426,14 +427,24 @@ void WriteWorld()
 
 void ResizeWindow(int length)//初始化或改变窗口大小
 {
+	static int isInited = 0;
 	blockSideLength = length;
 	heightOfInventory = 2*length;
-	setcaption("Minecraft Redstone Simulator");
-	SetProcessDPIAware();//避免Windows缩放造成模糊
-	initgraph(width*blockSideLength, height*blockSideLength+heightOfInventory, INIT_RENDERMANUAL | INIT_NOFORCEEXIT);
-	setfont(blockSideLength/2, 0, "Consolas");
-	setbkmode(TRANSPARENT);//默认设置为无背景字体
-	ege_enable_aa(true);
+	if(!isInited)
+	{
+		setcaption("Minecraft Redstone Simulator");
+		SetProcessDPIAware();//避免Windows缩放造成模糊
+		initgraph(width*blockSideLength, height*blockSideLength+heightOfInventory, INIT_RENDERMANUAL | INIT_NOFORCEEXIT);
+		setfont(blockSideLength/2, 0, "Consolas");
+		setbkmode(TRANSPARENT);//默认设置为无背景字体
+		ege_enable_aa(true);
+		isInited = 1;
+	}
+	else
+	{
+		resizewindow(width*blockSideLength, height*blockSideLength+heightOfInventory);
+		setfont(blockSideLength/2, 0, "Consolas");
+	}
 }
 
 void DrawTorch(int x0, int y0, int state)//绘制红石火把
@@ -1128,7 +1139,6 @@ void UpdateWorld()//根据t-1状态计算t状态
 		for(c=0; c<width; c++)
 		{
 			newState[r][c] = defaultState[world[r][c].id];
-			//if(world[r][c].id == Redstone_Repeater && world[r][c].delay > 1) newState[r][c].redstoneTick = state[r][c].redstoneTick;
 		}
 	}
 	//计算元件
@@ -1532,24 +1542,41 @@ void UpdateWorld()//根据t-1状态计算t状态
 		{
 			if(world[r][c].id == Redstone_Repeater)
 			{
-				if(state[r][c].state != newState[r][c].state)//新旧状态不同
-				{
-					if(world[r][c].delay > 1) newState[r][c].state = state[r][c].state;
-					if(state[r][c].redstoneTick == -1)
-					{
-						newState[r][c].redstoneTick = currentTick + world[r][c].delay-1;//记录改变刻
-					}
-				}
-				if(state[r][c].redstoneTick == currentTick)
+				if(state[r][c].redstoneTick != -1 && state[r][c].redstoneTick == currentTick)//到达改变刻
 				{
 					newState[r][c].state = !state[r][c].state;
 					newState[r][c].redstoneTick = -1;
-					if(newState[r][c].state == 1) newState[r][c].redstoneSignal = 15;
-					else newState[r][c].redstoneSignal = 0;
+					newState[r][c].redstoneSignal = newState[r][c].state ? 15 : 0;
 				}
-				if(state[r][c].isLocked == 1)
+				else if(state[r][c].redstoneTick == -1)//未延时，立即响应输入
 				{
-					newState[r][c].state = state[r][c].state;
+					if(state[r][c].state != newState[r][c].state)//新旧状态不同
+					{
+						if(world[r][c].delay == 1)//1刻中继器与输入红石信号状态同步
+						{
+							//newState[r][c].state = newState[r][c].state;//使用新状态
+							newState[r][c].redstoneSignal = newState[r][c].state ? 15 : 0;
+							newState[r][c].redstoneTick = -1;
+						}
+						else//开始延时
+						{
+							newState[r][c].state = state[r][c].state;//保持旧状态
+							newState[r][c].redstoneSignal = state[r][c].state ? 15 : 0;
+							newState[r][c].redstoneTick = currentTick + world[r][c].delay - 1;//记录改变刻
+						}
+					}
+				}
+				else//正在延时（保持一段时间亮起，或熄灭状态等一段时间后亮起）
+				{
+					newState[r][c].state = state[r][c].state;//使用旧状态
+					newState[r][c].redstoneSignal = state[r][c].state ? 15 : 0;
+					newState[r][c].redstoneTick = state[r][c].redstoneTick;//传递延时
+				}
+				if(state[r][c].isLocked == 1)//锁定
+				{
+					newState[r][c].state = state[r][c].state;//使用旧状态
+					newState[r][c].redstoneSignal = state[r][c].state ? 15 : 0;
+					newState[r][c].redstoneTick = -1;//重置延时
 				}
 			}
 			else if(world[r][c].id == Lever && state[r][c].state == 1)
@@ -1646,10 +1673,12 @@ Minecraft Redstone Simulator 1.1
 ——优化 现在红石线连接状态仅在加载、放置、破坏时计算
 ——优化 充能方块激活红石比较器代码
 ——优化 区分方块属性和红石状态
+——优化 编译体积（使用新版EGE，自研EGE模块分离）
 ——修复 按钮延时略长
+——修复 Ctrl+滚轮调整大小时黑色闪烁
 //——新增 红石块和红石灯视为方块
 //——优化 红石线不再主动连接红石灯
 //——优化 延长红石灯熄灭延迟至2刻
 //——优化 降低红石中继器锁定和解除锁定延迟
-//——修复 2刻和4刻红石中继器延时略长
+//——修复 对于1刻频闪信号，2刻和4刻红石中继器延时略长1刻
 --------------------------------*/
